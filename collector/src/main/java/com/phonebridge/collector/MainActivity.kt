@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
@@ -13,36 +14,72 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import com.phonebridge.shared.PairBundle
 
 class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
+    private lateinit var dashboardStatus: TextView
+    private lateinit var pairingScreen: View
+    private lateinit var dashboardScreen: View
+    private lateinit var prefs: BridgePrefs
+
     private val callPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted -> status.text = if (granted) "Call-log permission granted" else "Call-log permission denied" }
+    ) { granted ->
+        val text = if (granted) "Call-log permission granted" else "Call-log permission denied"
+        status.text = text
+        dashboardStatus.text = text
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        pairingScreen = findViewById(R.id.pairingScreen)
+        dashboardScreen = findViewById(R.id.dashboardScreen)
         status = findViewById(R.id.status)
-        val prefs = BridgePrefs(this)
-        if (prefs.pairId != null) status.text = "Paired: ${prefs.pairId}"
+        dashboardStatus = findViewById(R.id.dashboardStatus)
+        prefs = BridgePrefs(this)
+
+        if (prefs.pairId != null && prefs.receiverPublicKey != null) {
+            showDashboard()
+            dashboardStatus.text = "Connected to Phone 1"
+        } else {
+            showPairing()
+        }
 
         findViewById<Button>(R.id.btnPair).setOnClickListener {
-            val raw = findViewById<EditText>(R.id.pairBundle).text.toString().trim()
-            try {
-                val b = PairBundle.decode(raw)
-                prefs.pairId = b.pairId
-                prefs.receiverPublicKey = b.receiverPublicKeyB64
-                val relay = FirebaseRelay(this)
-                relay.ensureSignedIn { ok, err ->
-                    if (!ok) runOnUiThread { status.text = "Auth failed: $err" }
-                    else relay.registerPair { paired, e ->
-                        runOnUiThread { status.text = if (paired) "Paired successfully" else "Pairing failed: $e" }
+            val code = findViewById<EditText>(R.id.pairCode).text.toString().trim()
+            if (!code.matches(Regex("\\d{6}"))) {
+                status.text = "Enter the 6-digit code shown on Phone 1"
+                return@setOnClickListener
+            }
+
+            status.text = "Connecting..."
+            prefs.pairId = code
+            prefs.receiverPublicKey = null
+
+            val relay = FirebaseRelay(this)
+            relay.ensureSignedIn { ok, err ->
+                if (!ok) {
+                    runOnUiThread {
+                        prefs.pairId = null
+                        status.text = "Auth failed: $err"
+                    }
+                } else {
+                    relay.registerPair { paired, e ->
+                        runOnUiThread {
+                            if (paired) {
+                                status.text = "Paired successfully"
+                                dashboardStatus.text = "Connected to Phone 1"
+                                showDashboard()
+                            } else {
+                                prefs.pairId = null
+                                prefs.receiverPublicKey = null
+                                status.text = "Pairing failed. Check the 6-digit code and try again. ${e ?: ""}"
+                            }
+                        }
                     }
                 }
-            } catch (e: Exception) {
-                status.text = "Invalid pairing bundle"
             }
         }
 
@@ -53,13 +90,26 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnCalls).setOnClickListener {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG)
                 != PackageManager.PERMISSION_GRANTED
-            ) callPermission.launch(Manifest.permission.READ_CALL_LOG)
-            else status.text = "Call-log permission already granted"
+            ) {
+                callPermission.launch(Manifest.permission.READ_CALL_LOG)
+            } else {
+                dashboardStatus.text = "Call-log permission already granted"
+            }
         }
 
         findViewById<Button>(R.id.btnSync).setOnClickListener {
             WorkManager.getInstance(this).enqueue(OneTimeWorkRequestBuilder<CallLogWorker>().build())
-            status.text = "Call-log sync requested"
+            dashboardStatus.text = "Call-log sync requested"
         }
+    }
+
+    private fun showPairing() {
+        pairingScreen.visibility = View.VISIBLE
+        dashboardScreen.visibility = View.GONE
+    }
+
+    private fun showDashboard() {
+        pairingScreen.visibility = View.GONE
+        dashboardScreen.visibility = View.VISIBLE
     }
 }
