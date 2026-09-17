@@ -14,15 +14,8 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
     CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.READ_CALL_LOG)
-            != PackageManager.PERMISSION_GRANTED
-        ) return Result.failure()
-
         val prefs = BridgePrefs(applicationContext)
-        if (prefs.pairId == null) return Result.failure()
-
-        val pairedAt = prefs.pairedAtMs
-        if (pairedAt <= 0L) return Result.failure()
+        if (prefs.pairId == null || prefs.receiverPublicKey == null) return Result.failure()
 
         val relay = FirebaseRelay(applicationContext)
         val signedIn = suspendCancellableCoroutine<Boolean> { cont ->
@@ -30,12 +23,32 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
         }
         if (!signedIn) return Result.retry()
 
+        if (ContextCompat.checkSelfPermission(applicationContext, Manifest.permission.READ_CALL_LOG)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            relay.send(
+                PlainRecord(
+                    type = "alert",
+                    timestamp = System.currentTimeMillis(),
+                    source = "collector",
+                    title = "Call log permission removed",
+                    body = "Phone 2 can no longer read new call-log entries.",
+                    metadata = mapOf("severity" to "warning", "kind" to "call_permission")
+                )
+            )
+            return Result.failure()
+        }
+
+        val pairedAt = prefs.pairedAtMs
+        if (pairedAt <= 0L) return Result.failure()
+
         val projection = arrayOf(
             CallLog.Calls.NUMBER,
             CallLog.Calls.TYPE,
             CallLog.Calls.DATE,
             CallLog.Calls.DURATION,
-            CallLog.Calls.CACHED_NAME
+            CallLog.Calls.CACHED_NAME,
+            CallLog.Calls.PHONE_ACCOUNT_ID
         )
 
         val startAfter = maxOf(pairedAt, prefs.lastCallTimestamp)
@@ -53,6 +66,7 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
             val d = c.getColumnIndexOrThrow(CallLog.Calls.DATE)
             val dur = c.getColumnIndexOrThrow(CallLog.Calls.DURATION)
             val name = c.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME)
+            val account = c.getColumnIndex(CallLog.Calls.PHONE_ACCOUNT_ID)
 
             while (c.moveToNext()) {
                 val date = c.getLong(d)
@@ -60,24 +74,32 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
 
                 newest = maxOf(newest, date)
                 val type = when (c.getInt(t)) {
-                    CallLog.Calls.INCOMING_TYPE -> "incoming"
-                    CallLog.Calls.OUTGOING_TYPE -> "outgoing"
-                    CallLog.Calls.MISSED_TYPE -> "missed"
-                    CallLog.Calls.REJECTED_TYPE -> "rejected"
-                    else -> "other"
+                    CallLog.Calls.INCOMING_TYPE -> "Incoming"
+                    CallLog.Calls.OUTGOING_TYPE -> "Outgoing"
+                    CallLog.Calls.MISSED_TYPE -> "Missed"
+                    CallLog.Calls.REJECTED_TYPE -> "Rejected"
+                    CallLog.Calls.BLOCKED_TYPE -> "Blocked"
+                    else -> "Other"
                 }
+                val number = c.getString(n).orEmpty()
+                val contactName = c.getString(name).orEmpty()
+                val durationSec = c.getLong(dur)
+                val accountId = if (account >= 0) c.getString(account).orEmpty() else ""
 
                 relay.send(
                     PlainRecord(
                         type = "call",
                         timestamp = date,
                         source = "phone",
-                        title = c.getString(name) ?: c.getString(n).orEmpty(),
+                        title = contactName.ifBlank { number.ifBlank { "Unknown caller" } },
                         body = type,
                         metadata = mapOf(
-                            "number" to c.getString(n).orEmpty(),
+                            "number" to number,
+                            "contactName" to contactName,
                             "callType" to type,
-                            "durationSec" to c.getLong(dur).toString()
+                            "durationSec" to durationSec.toString(),
+                            "phoneAccountId" to accountId,
+                            "startedAtMs" to date.toString()
                         )
                     )
                 )
