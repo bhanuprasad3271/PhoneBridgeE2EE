@@ -22,16 +22,29 @@ class FirebaseRelay(private val activityOrService: android.content.Context) {
     }
 
     fun registerPair(done: (Boolean, String?) -> Unit) {
-        val pairId = prefs.pairId ?: return done(false, "No pair id")
+        val pairId = prefs.pairId ?: return done(false, "No pairing code")
         val uid = auth.currentUser?.uid ?: return done(false, "Not authenticated")
+        val pairRef = db.collection("pairs").document(pairId)
         val data = mapOf(
             "collectorUid" to uid,
             "collectorPublicKeyB64" to crypto.publicKeyB64(),
             "collectorPairedAt" to FieldValue.serverTimestamp()
         )
-        db.collection("pairs").document(pairId)
-            .update(data)
-            .addOnSuccessListener { done(true, null) }
+
+        pairRef.update(data)
+            .addOnSuccessListener {
+                pairRef.get()
+                    .addOnSuccessListener { snap ->
+                        val receiverKey = snap.getString("receiverPublicKeyB64")
+                        if (receiverKey.isNullOrBlank()) {
+                            done(false, "Receiver key missing")
+                        } else {
+                            prefs.receiverPublicKey = receiverKey
+                            done(true, null)
+                        }
+                    }
+                    .addOnFailureListener { done(false, it.message) }
+            }
             .addOnFailureListener { done(false, it.message) }
     }
 
