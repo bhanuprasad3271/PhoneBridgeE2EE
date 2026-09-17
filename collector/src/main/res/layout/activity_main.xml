@@ -78,7 +78,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="PhoneBridge Dashboard"
+                android:text="PhoneBridge Collector"
                 android:textSize="26sp"
                 android:textStyle="bold" />
 
@@ -86,7 +86,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Phone 2 is connected. Choose which Android permissions you want to allow."
+                android:text="Phone 2 is connected. Enable the permissions below. New calls sync automatically after a call finishes; permitted notifications sync when they arrive."
                 android:textSize="14sp" />
 
             <TextView
@@ -108,13 +108,13 @@
                 android:id="@+id/btnCalls"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Grant Call Log Permission" />
+                android:text="Enable Automatic Call Sync" />
 
             <Button
                 android:id="@+id/btnSync"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Sync Call Logs Now" />
+                android:text="Sync Now (Optional)" />
         </LinearLayout>
     </ScrollView>
 
