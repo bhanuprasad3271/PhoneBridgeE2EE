@@ -2,8 +2,8 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:orientation="vertical"
     android:padding="14dp"
-    android:layout_marginBottom="8dp"
-    android:background="#FFFFFF"
+    android:layout_marginBottom="10dp"
+    android:background="#111827"
     android:layout_width="match_parent"
     android:layout_height="wrap_content">
 
@@ -11,12 +11,14 @@
         android:id="@+id/title"
         android:textStyle="bold"
         android:textSize="16sp"
+        android:textColor="#F8FAFC"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
 
     <TextView
         android:id="@+id/body"
         android:layout_marginTop="4dp"
+        android:textColor="#E2E8F0"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
 
@@ -24,6 +26,7 @@
         android:id="@+id/meta"
         android:layout_marginTop="6dp"
         android:textSize="12sp"
+        android:textColor="#94A3B8"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"/>
 
@@ -33,6 +36,8 @@
         android:layout_height="wrap_content"
         android:layout_gravity="end"
         android:layout_marginTop="6dp"
+        android:backgroundTint="#7F1D1D"
+        android:textColor="#FEE2E2"
         android:text="Delete"
         android:textAllCaps="false"
         android:visibility="gone"/>
