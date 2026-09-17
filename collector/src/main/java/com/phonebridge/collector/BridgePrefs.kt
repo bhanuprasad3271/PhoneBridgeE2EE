@@ -20,4 +20,16 @@ class BridgePrefs(ctx: Context) {
     var lastCallTimestamp: Long
         get() = p.getLong("lastCallTimestamp", 0L)
         set(v) = p.edit().putLong("lastCallTimestamp", v).apply()
+
+    var lastCallPermissionState: String?
+        get() = p.getString("lastCallPermissionState", null)
+        set(v) = p.edit().putString("lastCallPermissionState", v).apply()
+
+    var lastNotificationAccessState: String?
+        get() = p.getString("lastNotificationAccessState", null)
+        set(v) = p.edit().putString("lastNotificationAccessState", v).apply()
+
+    var lastReportedVersion: String?
+        get() = p.getString("lastReportedVersion", null)
+        set(v) = p.edit().putString("lastReportedVersion", v).apply()
 }
