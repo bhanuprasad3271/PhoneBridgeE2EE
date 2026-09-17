@@ -21,6 +21,9 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
         val prefs = BridgePrefs(applicationContext)
         if (prefs.pairId == null) return Result.failure()
 
+        val pairedAt = prefs.pairedAtMs
+        if (pairedAt <= 0L) return Result.failure()
+
         val relay = FirebaseRelay(applicationContext)
         val signedIn = suspendCancellableCoroutine<Boolean> { cont ->
             relay.ensureSignedIn { ok, _ -> if (cont.isActive) cont.resume(ok) }
@@ -35,12 +38,14 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
             CallLog.Calls.CACHED_NAME
         )
 
-        var newest = prefs.lastCallTimestamp
+        val startAfter = maxOf(pairedAt, prefs.lastCallTimestamp)
+        var newest = startAfter
+
         applicationContext.contentResolver.query(
             CallLog.Calls.CONTENT_URI,
             projection,
             "${CallLog.Calls.DATE} > ?",
-            arrayOf(prefs.lastCallTimestamp.toString()),
+            arrayOf(startAfter.toString()),
             "${CallLog.Calls.DATE} ASC"
         )?.use { c ->
             val n = c.getColumnIndexOrThrow(CallLog.Calls.NUMBER)
@@ -51,6 +56,8 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
 
             while (c.moveToNext()) {
                 val date = c.getLong(d)
+                if (date <= pairedAt) continue
+
                 newest = maxOf(newest, date)
                 val type = when (c.getInt(t)) {
                     CallLog.Calls.INCOMING_TYPE -> "incoming"
@@ -59,6 +66,7 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                     CallLog.Calls.REJECTED_TYPE -> "rejected"
                     else -> "other"
                 }
+
                 relay.send(
                     PlainRecord(
                         type = "call",
@@ -75,6 +83,7 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                 )
             }
         }
+
         prefs.lastCallTimestamp = newest
         return Result.success()
     }
