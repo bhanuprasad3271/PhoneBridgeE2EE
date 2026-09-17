@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var messagesButton: Button
     private lateinit var callsButton: Button
     private lateinit var notificationsButton: Button
+    private lateinit var wpCallsButton: Button
     private lateinit var menuButton: Button
 
     private var pairRegistration: ListenerRegistration? = null
@@ -66,6 +67,7 @@ class MainActivity : AppCompatActivity() {
         messagesButton = findViewById(R.id.btnMessagesTab)
         callsButton = findViewById(R.id.btnCallsTab)
         notificationsButton = findViewById(R.id.btnNotificationsTab)
+        wpCallsButton = findViewById(R.id.btnWpCallsTab)
         menuButton = findViewById(R.id.btnMenu)
 
         adapter = RecordAdapter { record ->
@@ -82,6 +84,7 @@ class MainActivity : AppCompatActivity() {
         messagesButton.setOnClickListener { selectTab("message", "Messages") }
         callsButton.setOnClickListener { selectTab("call", "Calls") }
         notificationsButton.setOnClickListener { selectTab("notification", "Notifications") }
+        wpCallsButton.setOnClickListener { selectTab("wp_call", "WP Calls") }
         alertsButton.setOnClickListener { selectTab("alert", "Alerts / Device Status") }
         menuButton.setOnClickListener { showSettingsMenu(it) }
 
@@ -123,6 +126,7 @@ class MainActivity : AppCompatActivity() {
         messagesButton.isSelected = filter == "message"
         callsButton.isSelected = filter == "call"
         notificationsButton.isSelected = filter == "notification"
+        wpCallsButton.isSelected = filter == "wp_call"
         applyFilter()
     }
 
@@ -358,6 +362,7 @@ class MainActivity : AppCompatActivity() {
             "call" -> cachedRows.filter { it.type == "call" }
             "notification" -> cachedRows.filter { it.type == "notification" }
             "message" -> cachedRows.filter { it.type == "message" }
+            "wp_call" -> cachedRows.filter { it.type == "wp_call" }
             "alert" -> cachedRows.filter { it.type == "alert" || it.type == "status" }
             else -> cachedRows
         }
