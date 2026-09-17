@@ -30,10 +30,14 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var adapter: RecordAdapter
     private lateinit var status: TextView
+    private lateinit var dashboardStatus: TextView
     private lateinit var pairCodeText: TextView
+    private lateinit var listTitle: TextView
     private lateinit var pairingScreen: View
     private lateinit var dashboardScreen: View
     private var queueListening = false
+    private var currentFilter = "call"
+    private var cachedRows: List<RecordEntity> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,12 +46,30 @@ class MainActivity : AppCompatActivity() {
         pairingScreen = findViewById(R.id.pairingScreen)
         dashboardScreen = findViewById(R.id.dashboardScreen)
         status = findViewById(R.id.status)
+        dashboardStatus = findViewById(R.id.dashboardStatus)
         pairCodeText = findViewById(R.id.pairCode)
+        listTitle = findViewById(R.id.listTitle)
 
         adapter = RecordAdapter()
         findViewById<RecyclerView>(R.id.list).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = this@MainActivity.adapter
+        }
+
+        findViewById<Button>(R.id.btnMessagesTab).setOnClickListener {
+            currentFilter = "message"
+            listTitle.text = "Messages"
+            applyFilter()
+        }
+        findViewById<Button>(R.id.btnCallsTab).setOnClickListener {
+            currentFilter = "call"
+            listTitle.text = "Calls"
+            applyFilter()
+        }
+        findViewById<Button>(R.id.btnNotificationsTab).setOnClickListener {
+            currentFilter = "notification"
+            listTitle.text = "Notifications"
+            applyFilter()
         }
 
         lifecycleScope.launch { refreshLocal() }
@@ -130,7 +152,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             showDashboard()
-            status.text = "Connected to Phone 2"
+            dashboardStatus.text = "Connected to Phone 2"
 
             if (!queueListening) {
                 queueListening = true
@@ -177,7 +199,7 @@ class MainActivity : AppCompatActivity() {
                         d.reference.delete()
                     }
                 } catch (ex: Exception) {
-                    status.text = "Could not decrypt one record: ${ex.message}"
+                    dashboardStatus.text = "Could not decrypt one record: ${ex.message}"
                 }
             }
         }
@@ -193,8 +215,29 @@ class MainActivity : AppCompatActivity() {
         dashboardScreen.visibility = View.VISIBLE
     }
 
-    private suspend fun refreshLocal() {
-        val rows = withContext(Dispatchers.IO) { db.dao().all() }
+    private fun applyFilter() {
+        val rows = when (currentFilter) {
+            "call" -> cachedRows.filter { it.type == "call" }
+            "notification" -> cachedRows.filter { it.type == "notification" }
+            "message" -> cachedRows.filter {
+                it.type == "message" ||
+                    (it.type == "notification" && isMessagingSource(it.source))
+            }
+            else -> cachedRows
+        }
         adapter.submit(rows)
+    }
+
+    private fun isMessagingSource(source: String): Boolean {
+        val s = source.lowercase()
+        return listOf(
+            "whatsapp", "telegram", "signal", "messenger", "messages",
+            "sms", "instagram", "snapchat"
+        ).any { it in s }
+    }
+
+    private suspend fun refreshLocal() {
+        cachedRows = withContext(Dispatchers.IO) { db.dao().all() }
+        applyFilter()
     }
 }
