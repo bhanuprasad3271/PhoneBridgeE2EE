@@ -36,10 +36,11 @@ class BridgeNotificationListener : NotificationListenerService() {
             ?.filter { it.isNotBlank() }
             .orEmpty()
 
-        val combined = listOf(title, text, subText, bigText, summary, conversation)
+        val combinedRaw = listOf(title, text, subText, bigText, summary, conversation)
             .plus(textLines)
             .joinToString(" ")
-            .lowercase()
+        val combined = combinedRaw.lowercase()
+
         if (listOf("otp", "verification code", "security code", "one-time password").any { it in combined }) return
 
         val appName = try {
@@ -49,7 +50,8 @@ class BridgeNotificationListener : NotificationListenerService() {
             sbn.packageName
         }
 
-        val isMessage = n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName)
+        val isVoipCall = isVoipPackage(sbn.packageName) && isCallNotification(n, combined)
+        val isMessage = !isVoipCall && (n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName))
         val bestBody = when {
             bigText.isNotBlank() -> bigText
             textLines.isNotEmpty() -> textLines.joinToString("\n")
@@ -70,17 +72,60 @@ class BridgeNotificationListener : NotificationListenerService() {
             "notificationKey" to sbn.key
         )
 
+        val type: String
+        val body: String
+        if (isVoipCall) {
+            type = "wp_call"
+            val callState = detectCallState(combined)
+            metadata["callState"] = callState
+            metadata["callType"] = callState
+            metadata["durationSec"] = "0"
+            body = when {
+                bestBody.isNotBlank() -> bestBody
+                callState.isNotBlank() -> callState
+                else -> "VoIP call"
+            }
+        } else {
+            type = if (isMessage) "message" else "notification"
+            body = bestBody
+        }
+
         val record = PlainRecord(
-            type = if (isMessage) "message" else "notification",
+            type = type,
             timestamp = sbn.postTime,
             source = sbn.packageName,
             title = if (title.isNotBlank()) title else appName,
-            body = bestBody,
+            body = body,
             metadata = metadata
         )
 
         val relay = FirebaseRelay(this)
         relay.ensureSignedIn { ok, _ -> if (ok) relay.send(record) }
+    }
+
+    private fun isCallNotification(notification: Notification, text: String): Boolean {
+        if (notification.category == Notification.CATEGORY_CALL) return true
+        return listOf(
+            "incoming call", "outgoing call", "calling", "ringing", "ongoing call",
+            "missed call", "video call", "voice call", "call ended"
+        ).any { it in text }
+    }
+
+    private fun detectCallState(text: String): String = when {
+        "missed call" in text -> "missed"
+        "outgoing" in text || "calling" in text -> "outgoing"
+        "incoming" in text || "ringing" in text -> "incoming"
+        "ongoing" in text -> "ongoing"
+        "call ended" in text || "ended" in text -> "ended"
+        else -> "call"
+    }
+
+    private fun isVoipPackage(packageName: String): Boolean {
+        val p = packageName.lowercase()
+        return listOf(
+            "whatsapp", "telegram", "signal", "messenger", "facebook.orca",
+            "instagram", "meet", "skype", "teams", "viber"
+        ).any { it in p }
     }
 
     private fun isMessagingPackage(packageName: String): Boolean {
