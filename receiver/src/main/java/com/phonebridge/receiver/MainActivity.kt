@@ -3,6 +3,7 @@ package com.phonebridge.receiver
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
+import android.widget.PopupMenu
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -40,10 +41,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dashboardScreen: View
     private lateinit var alertsToolbar: View
     private lateinit var alertsButton: Button
+    private lateinit var messagesButton: Button
+    private lateinit var callsButton: Button
+    private lateinit var notificationsButton: Button
+    private lateinit var menuButton: Button
 
     private var pairRegistration: ListenerRegistration? = null
     private var queueRegistration: ListenerRegistration? = null
-    private var currentFilter = "call"
+    private var currentFilter = "message"
     private var cachedRows: List<RecordEntity> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +63,10 @@ class MainActivity : AppCompatActivity() {
         pairCodeText = findViewById(R.id.pairCode)
         listTitle = findViewById(R.id.listTitle)
         alertsButton = findViewById(R.id.btnAlertsTab)
+        messagesButton = findViewById(R.id.btnMessagesTab)
+        callsButton = findViewById(R.id.btnCallsTab)
+        notificationsButton = findViewById(R.id.btnNotificationsTab)
+        menuButton = findViewById(R.id.btnMenu)
 
         adapter = RecordAdapter { record ->
             lifecycleScope.launch {
@@ -70,10 +79,11 @@ class MainActivity : AppCompatActivity() {
             adapter = this@MainActivity.adapter
         }
 
-        findViewById<Button>(R.id.btnMessagesTab).setOnClickListener { selectTab("message", "Messages") }
-        findViewById<Button>(R.id.btnCallsTab).setOnClickListener { selectTab("call", "Calls") }
-        findViewById<Button>(R.id.btnNotificationsTab).setOnClickListener { selectTab("notification", "Notifications") }
+        messagesButton.setOnClickListener { selectTab("message", "Messages") }
+        callsButton.setOnClickListener { selectTab("call", "Calls") }
+        notificationsButton.setOnClickListener { selectTab("notification", "Notifications") }
         alertsButton.setOnClickListener { selectTab("alert", "Alerts / Device Status") }
+        menuButton.setOnClickListener { showSettingsMenu(it) }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
             lifecycleScope.launch {
@@ -85,38 +95,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.btnPairAnother).setOnClickListener {
-            disconnectCurrentPair {
-                showPairing()
-                createPairCode()
-            }
-        }
-
-        findViewById<Button>(R.id.btnResetPairing).setOnClickListener {
-            disconnectCurrentPair {
-                pairCodeText.text = "------"
-                status.text = "Pairing reset. Generate a new 6-digit code when ready."
-                showPairing()
-            }
-        }
-
-        findViewById<Button>(R.id.btnRemovePairing).setOnClickListener {
-            AlertDialog.Builder(this)
-                .setTitle("Remove pairing?")
-                .setMessage("Phone 2 will no longer be connected to this receiver. Your locally stored records remain on this phone.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Remove") { _, _ ->
-                    disconnectCurrentPair {
-                        pairCodeText.text = "------"
-                        status.text = "Pairing removed."
-                        showPairing()
-                    }
-                }
-                .show()
-        }
-
         lifecycleScope.launch { refreshLocal() }
         showPairing()
+        selectTab("message", "Messages")
 
         if (auth.currentUser == null) {
             auth.signInAnonymously()
@@ -139,7 +120,80 @@ class MainActivity : AppCompatActivity() {
         currentFilter = filter
         listTitle.text = title
         alertsToolbar.visibility = if (filter == "alert") View.VISIBLE else View.GONE
+        messagesButton.isSelected = filter == "message"
+        callsButton.isSelected = filter == "call"
+        notificationsButton.isSelected = filter == "notification"
         applyFilter()
+    }
+
+    private fun showSettingsMenu(anchor: View) {
+        PopupMenu(this, anchor).apply {
+            menu.add(0, 1, 0, "Pair another phone")
+            menu.add(0, 2, 1, "Reset pairing")
+            menu.add(0, 3, 2, "Remove pairing")
+            setOnMenuItemClickListener { item ->
+                when (item.itemId) {
+                    1 -> {
+                        confirmPairAnother()
+                        true
+                    }
+                    2 -> {
+                        confirmResetPairing()
+                        true
+                    }
+                    3 -> {
+                        confirmRemovePairing()
+                        true
+                    }
+                    else -> false
+                }
+            }
+            show()
+        }
+    }
+
+    private fun confirmPairAnother() {
+        AlertDialog.Builder(this)
+            .setTitle("Pair another phone?")
+            .setMessage("The current Phone 2 pairing will be removed and a new 6-digit code will be generated.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Continue") { _, _ ->
+                disconnectCurrentPair {
+                    showPairing()
+                    createPairCode()
+                }
+            }
+            .show()
+    }
+
+    private fun confirmResetPairing() {
+        AlertDialog.Builder(this)
+            .setTitle("Reset pairing?")
+            .setMessage("This clears the current pairing and returns to the pairing screen.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Reset") { _, _ ->
+                disconnectCurrentPair {
+                    pairCodeText.text = "------"
+                    status.text = "Pairing reset. Generate a new 6-digit code when ready."
+                    showPairing()
+                }
+            }
+            .show()
+    }
+
+    private fun confirmRemovePairing() {
+        AlertDialog.Builder(this)
+            .setTitle("Remove pairing?")
+            .setMessage("Phone 2 will no longer be connected. Records already stored on this receiver remain available.")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Remove") { _, _ ->
+                disconnectCurrentPair {
+                    pairCodeText.text = "------"
+                    status.text = "Pairing removed."
+                    showPairing()
+                }
+            }
+            .show()
     }
 
     private fun createPairCode() {
@@ -320,7 +374,7 @@ class MainActivity : AppCompatActivity() {
                 true
             }
         }
-        alertsButton.text = if (warningCount > 0) "Alerts ($warningCount)" else "Alerts"
+        alertsButton.text = if (warningCount > 0) "🔔 $warningCount" else "🔔"
         applyFilter()
     }
 }
