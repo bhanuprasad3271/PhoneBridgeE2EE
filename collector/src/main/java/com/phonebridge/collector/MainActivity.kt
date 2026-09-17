@@ -41,6 +41,11 @@ class MainActivity : AppCompatActivity() {
         prefs = BridgePrefs(this)
 
         if (prefs.pairId != null && prefs.receiverPublicKey != null) {
+            if (prefs.pairedAtMs == 0L) {
+                val now = System.currentTimeMillis()
+                prefs.pairedAtMs = now
+                prefs.lastCallTimestamp = now
+            }
             showDashboard()
             dashboardStatus.text = "Connected to Phone 1"
         } else {
@@ -57,24 +62,28 @@ class MainActivity : AppCompatActivity() {
             status.text = "Connecting..."
             prefs.pairId = code
             prefs.receiverPublicKey = null
+            prefs.pairedAtMs = 0L
+            prefs.lastCallTimestamp = 0L
 
             val relay = FirebaseRelay(this)
             relay.ensureSignedIn { ok, err ->
                 if (!ok) {
                     runOnUiThread {
-                        prefs.pairId = null
+                        clearPendingPair()
                         status.text = "Auth failed: $err"
                     }
                 } else {
                     relay.registerPair { paired, e ->
                         runOnUiThread {
                             if (paired) {
+                                val pairedAt = System.currentTimeMillis()
+                                prefs.pairedAtMs = pairedAt
+                                prefs.lastCallTimestamp = pairedAt
                                 status.text = "Paired successfully"
-                                dashboardStatus.text = "Connected to Phone 1"
+                                dashboardStatus.text = "Connected to Phone 1 · New calls only"
                                 showDashboard()
                             } else {
-                                prefs.pairId = null
-                                prefs.receiverPublicKey = null
+                                clearPendingPair()
                                 status.text = "Pairing failed. Check the 6-digit code and try again. ${e ?: ""}"
                             }
                         }
@@ -99,8 +108,15 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnSync).setOnClickListener {
             WorkManager.getInstance(this).enqueue(OneTimeWorkRequestBuilder<CallLogWorker>().build())
-            dashboardStatus.text = "Call-log sync requested"
+            dashboardStatus.text = "Sync requested · only calls after pairing are eligible"
         }
+    }
+
+    private fun clearPendingPair() {
+        prefs.pairId = null
+        prefs.receiverPublicKey = null
+        prefs.pairedAtMs = 0L
+        prefs.lastCallTimestamp = 0L
     }
 
     private fun showPairing() {
