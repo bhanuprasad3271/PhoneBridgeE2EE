@@ -51,6 +51,18 @@ class RecordAdapter(
                     if (account.isNotBlank()) append(" · SIM/Account: ").append(account)
                 }
             }
+            "wp_call" -> {
+                val app = metaJson.optString("appName", r.source)
+                val state = metaJson.optString("callState", "call")
+                val durationSec = metaJson.optLong("durationSec", 0L)
+                h.title.text = "$app · ${r.title}"
+                h.body.text = if (r.body.isNotBlank()) r.body else state
+                h.meta.text = buildString {
+                    append(whenText)
+                    append(" · ").append(state.replaceFirstChar { it.uppercase() })
+                    if (durationSec > 0L) append(" · Duration: ").append(formatDuration(durationSec))
+                }
+            }
             "message" -> {
                 val app = metaJson.optString("appName", r.source)
                 val conversation = metaJson.optString("conversationTitle")
