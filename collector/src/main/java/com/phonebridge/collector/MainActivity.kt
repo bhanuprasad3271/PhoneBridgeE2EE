@@ -11,9 +11,11 @@ import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import com.phonebridge.shared.PlainRecord
 
 class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
@@ -22,12 +24,22 @@ class MainActivity : AppCompatActivity() {
     private lateinit var dashboardScreen: View
     private lateinit var prefs: BridgePrefs
 
-    private val callPermission = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val text = if (granted) "Call-log permission granted" else "Call-log permission denied"
+    private val callPermissions = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val callGranted = result[Manifest.permission.READ_CALL_LOG] == true ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED
+        val phoneGranted = result[Manifest.permission.READ_PHONE_STATE] == true ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+
+        val text = if (callGranted && phoneGranted) {
+            "Automatic call sync enabled"
+        } else {
+            "Call sync permissions are incomplete"
+        }
         status.text = text
         dashboardStatus.text = text
+        reportCollectorState(force = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,9 +91,13 @@ class MainActivity : AppCompatActivity() {
                                 val pairedAt = System.currentTimeMillis()
                                 prefs.pairedAtMs = pairedAt
                                 prefs.lastCallTimestamp = pairedAt
+                                prefs.lastCallPermissionState = null
+                                prefs.lastNotificationAccessState = null
+                                prefs.lastReportedVersion = null
                                 status.text = "Paired successfully"
-                                dashboardStatus.text = "Connected to Phone 1 · New calls only"
+                                dashboardStatus.text = "Connected to Phone 1 · New activity only"
                                 showDashboard()
+                                reportCollectorState(force = true)
                             } else {
                                 clearPendingPair()
                                 status.text = "Pairing failed. Check the 6-digit code and try again. ${e ?: ""}"
@@ -97,18 +113,90 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnCalls).setOnClickListener {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                callPermission.launch(Manifest.permission.READ_CALL_LOG)
-            } else {
-                dashboardStatus.text = "Call-log permission already granted"
-            }
+            callPermissions.launch(
+                arrayOf(
+                    Manifest.permission.READ_CALL_LOG,
+                    Manifest.permission.READ_PHONE_STATE
+                )
+            )
         }
 
         findViewById<Button>(R.id.btnSync).setOnClickListener {
             WorkManager.getInstance(this).enqueue(OneTimeWorkRequestBuilder<CallLogWorker>().build())
-            dashboardStatus.text = "Sync requested · only calls after pairing are eligible"
+            dashboardStatus.text = "Optional sync requested · automatic sync remains enabled"
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::prefs.isInitialized && prefs.pairId != null && prefs.receiverPublicKey != null) {
+            reportCollectorState(force = false)
+        }
+    }
+
+    private fun reportCollectorState(force: Boolean) {
+        if (prefs.pairId == null || prefs.receiverPublicKey == null) return
+
+        val callGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        val notifGranted = packageName in NotificationManagerCompat.getEnabledListenerPackages(this)
+        val version = try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
+        } catch (_: Exception) {
+            "unknown"
+        }
+
+        val relay = FirebaseRelay(this)
+        relay.ensureSignedIn { ok, _ ->
+            if (!ok) return@ensureSignedIn
+
+            val callState = if (callGranted) "enabled" else "disabled"
+            if (force || prefs.lastCallPermissionState != callState) {
+                relay.send(
+                    PlainRecord(
+                        type = "alert",
+                        timestamp = System.currentTimeMillis(),
+                        source = "collector",
+                        title = if (callGranted) "Automatic call sync active" else "Call sync permission missing",
+                        body = if (callGranted) "Phone 2 can automatically send new call-log entries after calls finish." else "Phone 2 needs Call Log and Phone State permissions for automatic call syncing.",
+                        metadata = mapOf("severity" to if (callGranted) "resolved" else "warning", "kind" to "call_permission")
+                    )
+                )
+                prefs.lastCallPermissionState = callState
+            }
+
+            val notifState = if (notifGranted) "enabled" else "disabled"
+            if (force || prefs.lastNotificationAccessState != notifState) {
+                relay.send(
+                    PlainRecord(
+                        type = "alert",
+                        timestamp = System.currentTimeMillis(),
+                        source = "collector",
+                        title = if (notifGranted) "Notification access active" else "Notification access disabled",
+                        body = if (notifGranted) "Phone 2 can send permitted notification previews." else "Notification access must be enabled on Phone 2 to receive message and notification previews.",
+                        metadata = mapOf("severity" to if (notifGranted) "resolved" else "warning", "kind" to "notification_access")
+                    )
+                )
+                prefs.lastNotificationAccessState = notifState
+            }
+
+            if (force || prefs.lastReportedVersion != version) {
+                relay.send(
+                    PlainRecord(
+                        type = "status",
+                        timestamp = System.currentTimeMillis(),
+                        source = "collector",
+                        title = "Collector app status",
+                        body = "Collector version $version is connected.",
+                        metadata = mapOf(
+                            "appVersion" to version,
+                            "callSync" to callState,
+                            "notificationAccess" to notifState
+                        )
+                    )
+                )
+                prefs.lastReportedVersion = version
+            }
         }
     }
 
@@ -117,6 +205,9 @@ class MainActivity : AppCompatActivity() {
         prefs.receiverPublicKey = null
         prefs.pairedAtMs = 0L
         prefs.lastCallTimestamp = 0L
+        prefs.lastCallPermissionState = null
+        prefs.lastNotificationAccessState = null
+        prefs.lastReportedVersion = null
     }
 
     private fun showPairing() {
