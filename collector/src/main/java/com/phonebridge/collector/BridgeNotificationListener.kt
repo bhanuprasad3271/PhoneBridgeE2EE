@@ -13,11 +13,11 @@ class BridgeNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        sendAlert("Notification access active", "Notification access is enabled on Phone 2.", "resolved")
+        sendAlert("Notification access active", "Notification access is enabled on the Sender.", "resolved")
     }
 
     override fun onListenerDisconnected() {
-        sendAlert("Notification access disabled", "Notification access is not active on Phone 2.", "warning")
+        sendAlert("Notification access disabled", "Notification access is not active on the Sender.", "warning")
         super.onListenerDisconnected()
     }
 
@@ -254,7 +254,7 @@ class BridgeNotificationListener : NotificationListenerService() {
                     PlainRecord(
                         type = "alert",
                         timestamp = System.currentTimeMillis(),
-                        source = "collector",
+                        source = "sender",
                         title = title,
                         body = body,
                         metadata = mapOf("severity" to severity, "kind" to "notification_access")
