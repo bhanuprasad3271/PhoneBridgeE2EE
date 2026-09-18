@@ -9,6 +9,7 @@ import androidx.work.WorkerParameters
 import com.phonebridge.shared.PlainRecord
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
+import kotlin.math.abs
 
 class CallLogWorker(appContext: android.content.Context, params: WorkerParameters) :
     CoroutineWorker(appContext, params) {
@@ -30,7 +31,7 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                 PlainRecord(
                     type = "alert",
                     timestamp = System.currentTimeMillis(),
-                    source = "collector",
+                    source = "sender",
                     title = "Call log permission removed",
                     body = "Phone 2 can no longer read new call-log entries.",
                     metadata = mapOf("severity" to "warning", "kind" to "call_permission")
@@ -54,6 +55,9 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
         val startAfter = maxOf(pairedAt, prefs.lastCallTimestamp)
         var newest = startAfter
         var sentAny = false
+        var finalizedLiveSession = false
+        val liveSessionId = prefs.currentCallSessionId
+        val liveStartedAt = prefs.currentCallStartedAtMs
         val observedHistory = prefs.currentCallStateHistory
 
         applicationContext.contentResolver.query(
@@ -88,34 +92,54 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                 val contactName = c.getString(name).orEmpty()
                 val durationSec = c.getLong(dur)
                 val accountId = if (account >= 0) c.getString(account).orEmpty() else ""
-                val stateHistory = buildStateHistory(type, durationSec, observedHistory)
+
+                val matchesLive = !liveSessionId.isNullOrBlank() &&
+                    liveStartedAt > 0L &&
+                    abs(date - liveStartedAt) <= 15 * 60 * 1000L
+
+                val sessionKey = if (matchesLive) {
+                    liveSessionId!!
+                } else {
+                    "phone_${date}_${number.hashCode()}_${type}_${accountId.hashCode()}"
+                }
+
+                val stateHistory = buildStateHistory(
+                    type = type,
+                    durationSec = durationSec,
+                    observed = if (matchesLive) observedHistory else ""
+                )
 
                 relay.send(
                     PlainRecord(
                         type = "call",
-                        timestamp = date,
+                        timestamp = if (matchesLive && liveStartedAt > 0L) liveStartedAt else date,
                         source = "phone",
                         title = contactName.ifBlank { number.ifBlank { "Unknown caller" } },
                         body = stateHistory,
                         metadata = mapOf(
+                            "sessionKey" to sessionKey,
                             "number" to number,
                             "contactName" to contactName,
                             "callType" to type,
                             "stateHistory" to stateHistory,
                             "durationSec" to durationSec.toString(),
                             "phoneAccountId" to accountId,
-                            "startedAtMs" to date.toString()
+                            "startedAtMs" to date.toString(),
+                            "liveUpdate" to "false"
                         )
                     )
                 )
                 sentAny = true
+                if (matchesLive) finalizedLiveSession = true
             }
         }
 
-        prefs.lastCallTimestamp = newest
-        if (sentAny) {
+        if (sentAny) prefs.lastCallTimestamp = newest
+        if (finalizedLiveSession) {
             prefs.currentCallStateHistory = ""
             prefs.currentCallStartedAtMs = 0L
+            prefs.currentCallSessionId = null
+            prefs.currentCallNumber = ""
         }
         return Result.success()
     }
@@ -125,27 +149,23 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
             "Missed" -> "Incoming → Missed"
             "Rejected" -> "Incoming → Rejected"
             "Blocked" -> "Blocked"
-            "Incoming" -> {
-                if (durationSec > 0) {
-                    when {
-                        observed.startsWith("Incoming") && "Ongoing" in observed ->
-                            ensureEnded(observed)
-                        else -> "Incoming → Ongoing → Ended"
-                    }
+            "Incoming" -> if (durationSec > 0L) {
+                if (observed.startsWith("Incoming") && "Ongoing" in observed) {
+                    ensureEnded(observed)
                 } else {
-                    "Incoming → Ended"
+                    "Incoming → Ongoing → Ended"
                 }
+            } else {
+                "Incoming → Ended"
             }
-            "Outgoing" -> {
-                if (durationSec > 0) {
-                    when {
-                        observed.startsWith("Outgoing") && "Ongoing" in observed ->
-                            ensureEnded(observed)
-                        else -> "Outgoing → Ongoing → Ended"
-                    }
+            "Outgoing" -> if (durationSec > 0L) {
+                if (observed.startsWith("Outgoing") && "Ongoing" in observed) {
+                    ensureEnded(observed)
                 } else {
-                    "Outgoing → Ended"
+                    "Outgoing → Ongoing → Ended"
                 }
+            } else {
+                "Outgoing → Ended"
             }
             else -> observed.ifBlank { type }
         }
