@@ -53,6 +53,8 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
 
         val startAfter = maxOf(pairedAt, prefs.lastCallTimestamp)
         var newest = startAfter
+        var sentAny = false
+        val observedHistory = prefs.currentCallStateHistory
 
         applicationContext.contentResolver.query(
             CallLog.Calls.CONTENT_URI,
@@ -81,10 +83,12 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                     CallLog.Calls.BLOCKED_TYPE -> "Blocked"
                     else -> "Other"
                 }
+
                 val number = c.getString(n).orEmpty()
                 val contactName = c.getString(name).orEmpty()
                 val durationSec = c.getLong(dur)
                 val accountId = if (account >= 0) c.getString(account).orEmpty() else ""
+                val stateHistory = buildStateHistory(type, durationSec, observedHistory)
 
                 relay.send(
                     PlainRecord(
@@ -92,21 +96,61 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                         timestamp = date,
                         source = "phone",
                         title = contactName.ifBlank { number.ifBlank { "Unknown caller" } },
-                        body = type,
+                        body = stateHistory,
                         metadata = mapOf(
                             "number" to number,
                             "contactName" to contactName,
                             "callType" to type,
+                            "stateHistory" to stateHistory,
                             "durationSec" to durationSec.toString(),
                             "phoneAccountId" to accountId,
                             "startedAtMs" to date.toString()
                         )
                     )
                 )
+                sentAny = true
             }
         }
 
         prefs.lastCallTimestamp = newest
+        if (sentAny) {
+            prefs.currentCallStateHistory = ""
+            prefs.currentCallStartedAtMs = 0L
+        }
         return Result.success()
     }
+
+    private fun buildStateHistory(type: String, durationSec: Long, observed: String): String {
+        return when (type) {
+            "Missed" -> "Incoming → Missed"
+            "Rejected" -> "Incoming → Rejected"
+            "Blocked" -> "Blocked"
+            "Incoming" -> {
+                if (durationSec > 0) {
+                    when {
+                        observed.startsWith("Incoming") && "Ongoing" in observed ->
+                            ensureEnded(observed)
+                        else -> "Incoming → Ongoing → Ended"
+                    }
+                } else {
+                    "Incoming → Ended"
+                }
+            }
+            "Outgoing" -> {
+                if (durationSec > 0) {
+                    when {
+                        observed.startsWith("Outgoing") && "Ongoing" in observed ->
+                            ensureEnded(observed)
+                        else -> "Outgoing → Ongoing → Ended"
+                    }
+                } else {
+                    "Outgoing → Ended"
+                }
+            }
+            else -> observed.ifBlank { type }
+        }
+    }
+
+    private fun ensureEnded(history: String): String =
+        if ("Ended" in history) history else "$history → Ended"
 }
