@@ -18,7 +18,7 @@ interface RecordDao {
     @Query("SELECT * FROM records ORDER BY timestamp DESC")
     suspend fun all(): List<RecordEntity>
 
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(r: RecordEntity)
 
     @Query("DELETE FROM records WHERE id = :id")
