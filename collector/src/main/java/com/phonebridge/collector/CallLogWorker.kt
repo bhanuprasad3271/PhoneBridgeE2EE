@@ -140,6 +140,8 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
             prefs.currentCallStartedAtMs = 0L
             prefs.currentCallSessionId = null
             prefs.currentCallNumber = ""
+        } else if (!liveSessionId.isNullOrBlank()) {
+            return Result.retry()
         }
         return Result.success()
     }
