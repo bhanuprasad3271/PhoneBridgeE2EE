@@ -306,15 +306,22 @@ class MainActivity : AppCompatActivity() {
                     val record = JsonCodec.decode(plain)
 
                     lifecycleScope.launch {
+                        val metadataJson = JSONObject(record.metadata)
+                        val localId = if (record.type == "wp_call") {
+                            val sessionKey = metadataJson.optString("sessionKey")
+                            if (sessionKey.isNotBlank()) "wp_call_${sessionKey.hashCode()}" else id
+                        } else {
+                            id
+                        }
                         db.dao().insert(
                             RecordEntity(
-                                id = id,
+                                id = localId,
                                 type = record.type,
                                 timestamp = record.timestamp,
                                 source = record.source,
                                 title = record.title,
                                 body = record.body,
-                                metadataJson = JSONObject(record.metadata).toString()
+                                metadataJson = metadataJson.toString()
                             )
                         )
                         refreshLocal()
