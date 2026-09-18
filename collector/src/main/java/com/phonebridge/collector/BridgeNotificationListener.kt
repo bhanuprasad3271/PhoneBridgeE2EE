@@ -11,6 +11,10 @@ class BridgeNotificationListener : NotificationListenerService() {
         getSharedPreferences("voip_call_sessions", MODE_PRIVATE)
     }
 
+    private val messageDedupePrefs by lazy {
+        getSharedPreferences("message_dedupe", MODE_PRIVATE)
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         sendAlert("Notification access active", "Notification access is enabled on the Sender.", "resolved")
@@ -62,6 +66,19 @@ class BridgeNotificationListener : NotificationListenerService() {
         }
 
         val isMessage = n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName)
+        val messageBody = bestBody(bigText, textLines, text)
+
+        if (isMessage && isDuplicateMessage(
+                packageName = sbn.packageName,
+                notificationKey = sbn.key,
+                title = title,
+                conversation = conversation,
+                body = messageBody
+            )
+        ) {
+            return
+        }
+
         val metadata = linkedMapOf(
             "appName" to appName,
             "packageName" to sbn.packageName,
@@ -81,7 +98,7 @@ class BridgeNotificationListener : NotificationListenerService() {
             timestamp = sbn.postTime,
             source = sbn.packageName,
             title = if (title.isNotBlank()) title else appName,
-            body = bestBody(bigText, textLines, text),
+            body = messageBody,
             metadata = metadata
         )
 
@@ -202,6 +219,45 @@ class BridgeNotificationListener : NotificationListenerService() {
         bigText.isNotBlank() -> bigText
         lines.isNotEmpty() -> lines.joinToString("\n")
         else -> text
+    }
+
+    private fun isDuplicateMessage(
+        packageName: String,
+        notificationKey: String,
+        title: String,
+        conversation: String,
+        body: String
+    ): Boolean {
+        val now = System.currentTimeMillis()
+        val fingerprint = listOf(
+            packageName,
+            notificationKey,
+            title.trim(),
+            conversation.trim(),
+            body.trim()
+        ).joinToString("|").hashCode().toString()
+
+        val prefKey = "fp_$fingerprint"
+        val previousAt = messageDedupePrefs.getLong(prefKey, 0L)
+        val duplicate = previousAt > 0L && now - previousAt <= 5_000L
+
+        messageDedupePrefs.edit().putLong(prefKey, now).apply()
+
+        if (!duplicate) {
+            // Keep the tiny cache bounded by occasionally clearing old fingerprints.
+            val lastCleanup = messageDedupePrefs.getLong("last_cleanup", 0L)
+            if (now - lastCleanup > 60_000L) {
+                val editor = messageDedupePrefs.edit()
+                messageDedupePrefs.all.forEach { (key, value) ->
+                    if (key.startsWith("fp_") && value is Long && now - value > 60_000L) {
+                        editor.remove(key)
+                    }
+                }
+                editor.putLong("last_cleanup", now).apply()
+            }
+        }
+
+        return duplicate
     }
 
     private fun appNameFor(packageName: String): String = try {
