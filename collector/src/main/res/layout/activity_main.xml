@@ -78,7 +78,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="PhoneBridge Collector"
+                android:text="PhoneBridge Sender"
                 android:textSize="26sp"
                 android:textStyle="bold" />
 
@@ -86,7 +86,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Phone 2 is connected. Enable the permissions below. New calls sync automatically after a call finishes; permitted notifications sync when they arrive."
+                android:text="Phone 2 is connected. Enable the permissions below. Calls update live and are finalized from the call log; permitted notifications sync when they arrive."
                 android:textSize="14sp" />
 
             <TextView
