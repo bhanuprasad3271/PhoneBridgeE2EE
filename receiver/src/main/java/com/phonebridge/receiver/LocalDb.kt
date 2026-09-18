@@ -21,6 +21,9 @@ interface RecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(r: RecordEntity)
 
+    @Query("SELECT * FROM records WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): RecordEntity?
+
     @Query("DELETE FROM records WHERE id = :id")
     suspend fun deleteById(id: String)
 
