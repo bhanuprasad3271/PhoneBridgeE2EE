@@ -68,14 +68,7 @@ class BridgeNotificationListener : NotificationListenerService() {
         val isMessage = n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName)
         val messageBody = bestBody(bigText, textLines, text)
 
-        if (isMessage && isDuplicateMessage(
-                packageName = sbn.packageName,
-                notificationKey = sbn.key,
-                title = title,
-                conversation = conversation,
-                body = messageBody
-            )
-        ) {
+        if (isMessage && isDuplicateMessageEvent(sbn)) {
             return
         }
 
@@ -221,43 +214,50 @@ class BridgeNotificationListener : NotificationListenerService() {
         else -> text
     }
 
-    private fun isDuplicateMessage(
-        packageName: String,
-        notificationKey: String,
-        title: String,
-        conversation: String,
-        body: String
-    ): Boolean {
+    private fun isDuplicateMessageEvent(sbn: StatusBarNotification): Boolean {
         val now = System.currentTimeMillis()
-        val fingerprint = listOf(
-            packageName,
-            notificationKey,
-            title.trim(),
-            conversation.trim(),
-            body.trim()
-        ).joinToString("|").hashCode().toString()
+        val eventTime = latestMessageEventTime(sbn.notification)
+            .takeIf { it > 0L }
+            ?: sbn.notification.`when`.takeIf { it > 0L }
+            ?: sbn.postTime
 
-        val prefKey = "fp_$fingerprint"
-        val previousAt = messageDedupePrefs.getLong(prefKey, 0L)
-        val duplicate = previousAt > 0L && now - previousAt <= 5_000L
+        val eventIdentity = listOf(
+            sbn.packageName,
+            sbn.key,
+            eventTime.toString()
+        ).joinToString("|")
 
-        messageDedupePrefs.edit().putLong(prefKey, now).apply()
+        val prefKey = "event_${eventIdentity.hashCode()}"
+        val seenAt = messageDedupePrefs.getLong(prefKey, 0L)
+        val duplicate = seenAt > 0L
 
         if (!duplicate) {
-            // Keep the tiny cache bounded by occasionally clearing old fingerprints.
-            val lastCleanup = messageDedupePrefs.getLong("last_cleanup", 0L)
-            if (now - lastCleanup > 60_000L) {
-                val editor = messageDedupePrefs.edit()
-                messageDedupePrefs.all.forEach { (key, value) ->
-                    if (key.startsWith("fp_") && value is Long && now - value > 60_000L) {
-                        editor.remove(key)
-                    }
+            messageDedupePrefs.edit().putLong(prefKey, now).apply()
+        }
+
+        val lastCleanup = messageDedupePrefs.getLong("last_cleanup", 0L)
+        if (now - lastCleanup > 10 * 60 * 1000L) {
+            val editor = messageDedupePrefs.edit()
+            messageDedupePrefs.all.forEach { (key, value) ->
+                if (key.startsWith("event_") && value is Long && now - value > 60 * 60 * 1000L) {
+                    editor.remove(key)
                 }
-                editor.putLong("last_cleanup", now).apply()
             }
+            editor.putLong("last_cleanup", now).apply()
         }
 
         return duplicate
+    }
+
+    private fun latestMessageEventTime(notification: Notification): Long {
+        val messages = notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES).orEmpty()
+        var latest = 0L
+        messages.forEach { item ->
+            val bundle = item as? android.os.Bundle ?: return@forEach
+            val time = bundle.getLong("time", 0L)
+            if (time > latest) latest = time
+        }
+        return latest
     }
 
     private fun appNameFor(packageName: String): String = try {
