@@ -2,7 +2,10 @@ package com.phonebridge.receiver
 
 import android.Manifest
 import android.app.DatePickerDialog
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -23,11 +26,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.room.Room
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.phonebridge.shared.CryptoBox
-import com.phonebridge.shared.JsonCodec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -65,7 +66,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var filterButton: Button
 
     private var pairRegistration: ListenerRegistration? = null
-    private var queueRegistration: ListenerRegistration? = null
+    private var updateReceiverRegistered = false
+
+    private val dataUpdateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            lifecycleScope.launch { refreshLocal() }
+        }
+    }
     private var currentFilter = "message"
     private var cachedRows: List<RecordEntity> = emptyList()
     private val sectionFilters = mutableMapOf<String, FilterCriteria>()
@@ -149,9 +156,30 @@ class MainActivity : AppCompatActivity() {
         if (dashboardScreen.visibility == View.VISIBLE) applyPendingSection()
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (!updateReceiverRegistered) {
+            ContextCompat.registerReceiver(
+                this,
+                dataUpdateReceiver,
+                IntentFilter(ReceiverSyncService.ACTION_DATA_UPDATED),
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
+            updateReceiverRegistered = true
+        }
+        lifecycleScope.launch { refreshLocal() }
+    }
+
+    override fun onStop() {
+        if (updateReceiverRegistered) {
+            unregisterReceiver(dataUpdateReceiver)
+            updateReceiverRegistered = false
+        }
+        super.onStop()
+    }
+
     override fun onDestroy() {
         pairRegistration?.remove()
-        queueRegistration?.remove()
         super.onDestroy()
     }
 
@@ -530,8 +558,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun listen(pairId: String) {
         pairRegistration?.remove()
-        queueRegistration?.remove()
-        queueRegistration = null
 
         val pairRef = fs.collection("pairs").document(pairId)
         pairRegistration = pairRef.addSnapshotListener { pairSnap, err ->
@@ -557,77 +583,6 @@ class MainActivity : AppCompatActivity() {
 
             showDashboard()
             dashboardStatus.text = "Connected to Sender"
-            if (queueRegistration == null) {
-                queueRegistration = listenForRecords(pairRef, pairId, collectorKey)
-            }
-        }
-    }
-
-    private fun listenForRecords(
-        pairRef: DocumentReference,
-        pairId: String,
-        collectorKey: String
-    ): ListenerRegistration {
-        return pairRef.collection("queue").addSnapshotListener { snap, e ->
-            if (e != null || snap == null) return@addSnapshotListener
-
-            snap.documentChanges.forEach { change ->
-                if (change.type.name != "ADDED") return@forEach
-                val d = change.document
-                val id = d.getString("id") ?: d.id
-                val type = d.getString("type") ?: "unknown"
-                val ct = d.getString("ciphertextB64") ?: return@forEach
-                val nonce = d.getString("nonceB64") ?: return@forEach
-
-                try {
-                    val key = crypto.deriveAesKey(collectorKey, pairId)
-                    val aad = (pairId + "|" + id + "|" + type + "|1").toByteArray()
-                    val plain = crypto.decrypt(key, ct, nonce, aad).toString(Charsets.UTF_8)
-                    val record = JsonCodec.decode(plain)
-
-                    lifecycleScope.launch {
-                        val metadataJson = JSONObject(record.metadata)
-                        val sessionKey = metadataJson.optString("sessionKey")
-                        val localId = if ((record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank()) {
-                            record.type + "_" + sessionKey.hashCode()
-                        } else {
-                            id
-                        }
-
-                        val entity = RecordEntity(
-                            id = localId,
-                            type = record.type,
-                            timestamp = record.timestamp,
-                            source = record.source,
-                            title = record.title,
-                            body = record.body,
-                            metadataJson = metadataJson.toString()
-                        )
-
-                        val isSessionRecord = record.type == "call" || record.type == "wp_call"
-                        val existing = if (isSessionRecord) db.dao().getById(localId) else null
-                        val newUpdatedAt = metadataJson.optLong("updatedAtMs", record.timestamp)
-                        val oldUpdatedAt = if (existing != null) {
-                            try {
-                                JSONObject(existing.metadataJson).optLong("updatedAtMs", existing.timestamp)
-                            } catch (_: Exception) {
-                                existing.timestamp
-                            }
-                        } else {
-                            Long.MIN_VALUE
-                        }
-
-                        if (!isSessionRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
-                            db.dao().insert(entity)
-                            receiverNotifications.post(entity, localId)
-                            refreshLocal()
-                        }
-                        d.reference.delete()
-                    }
-                } catch (ex: Exception) {
-                    dashboardStatus.text = "Could not decrypt one record: " + ex.message
-                }
-            }
         }
     }
 
@@ -635,8 +590,7 @@ class MainActivity : AppCompatActivity() {
         val pairId = prefs.getString("pairId", null)
         pairRegistration?.remove()
         pairRegistration = null
-        queueRegistration?.remove()
-        queueRegistration = null
+        stopService(Intent(this, ReceiverSyncService::class.java))
 
         fun finish() {
             prefs.edit().remove("pairId").apply()
@@ -659,6 +613,11 @@ class MainActivity : AppCompatActivity() {
     private fun showDashboard() {
         pairingScreen.visibility = View.GONE
         dashboardScreen.visibility = View.VISIBLE
+        ContextCompat.startForegroundService(
+            this,
+            Intent(this, ReceiverSyncService::class.java)
+        )
+        lifecycleScope.launch { refreshLocal() }
         applyPendingSection()
     }
 
