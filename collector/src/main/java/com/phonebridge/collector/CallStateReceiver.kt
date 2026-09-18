@@ -106,6 +106,7 @@ class CallStateReceiver : BroadcastReceiver() {
                         "durationSec" to "0",
                         "phoneAccountId" to "",
                         "startedAtMs" to startedAt.toString(),
+                        "updatedAtMs" to System.currentTimeMillis().toString(),
                         "liveUpdate" to "true"
                     )
                 )
