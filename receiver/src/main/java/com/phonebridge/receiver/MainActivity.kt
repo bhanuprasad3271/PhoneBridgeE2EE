@@ -24,6 +24,8 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.room.Room
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -162,7 +164,7 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.registerReceiver(
                 this,
                 dataUpdateReceiver,
-                IntentFilter(ReceiverSyncService.ACTION_DATA_UPDATED),
+                IntentFilter(ReceiverSyncWorker.ACTION_DATA_UPDATED),
                 ContextCompat.RECEIVER_NOT_EXPORTED
             )
             updateReceiverRegistered = true
@@ -590,8 +592,6 @@ class MainActivity : AppCompatActivity() {
         val pairId = prefs.getString("pairId", null)
         pairRegistration?.remove()
         pairRegistration = null
-        stopService(Intent(this, ReceiverSyncService::class.java))
-
         fun finish() {
             prefs.edit().remove("pairId").apply()
             after()
@@ -613,10 +613,12 @@ class MainActivity : AppCompatActivity() {
     private fun showDashboard() {
         pairingScreen.visibility = View.GONE
         dashboardScreen.visibility = View.VISIBLE
-        ContextCompat.startForegroundService(
-            this,
-            Intent(this, ReceiverSyncService::class.java)
+
+        FcmRegistration.registerCurrentToken(this)
+        WorkManager.getInstance(this).enqueue(
+            OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
         )
+
         lifecycleScope.launch { refreshLocal() }
         applyPendingSection()
     }
