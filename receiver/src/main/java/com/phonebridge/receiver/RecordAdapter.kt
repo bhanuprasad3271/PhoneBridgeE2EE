@@ -41,10 +41,11 @@ class RecordAdapter(
             "call" -> {
                 val number = metaJson.optString("number")
                 val type = metaJson.optString("callType", r.body)
+                val history = metaJson.optString("stateHistory", type)
                 val duration = formatDuration(metaJson.optLong("durationSec", 0L))
                 val account = metaJson.optString("phoneAccountId")
                 h.title.text = if (number.isNotBlank() && number != r.title) "${r.title} · $number" else r.title
-                h.body.text = type
+                h.body.text = history
                 h.meta.text = buildString {
                     append(whenText)
                     append(" · Duration: ").append(duration)
@@ -53,13 +54,13 @@ class RecordAdapter(
             }
             "wp_call" -> {
                 val app = metaJson.optString("appName", r.source)
-                val state = metaJson.optString("callState", "call")
+                val state = metaJson.optString("callState", "Call")
+                val history = metaJson.optString("stateHistory", r.body.ifBlank { state })
                 val durationSec = metaJson.optLong("durationSec", 0L)
                 h.title.text = "$app · ${r.title}"
-                h.body.text = if (r.body.isNotBlank()) r.body else state
+                h.body.text = history
                 h.meta.text = buildString {
                     append(whenText)
-                    append(" · ").append(state.replaceFirstChar { it.uppercase() })
                     if (durationSec > 0L) append(" · Duration: ").append(formatDuration(durationSec))
                 }
             }
