@@ -604,9 +604,24 @@ class MainActivity : AppCompatActivity() {
                             metadataJson = metadataJson.toString()
                         )
 
-                        db.dao().insert(entity)
-                        receiverNotifications.post(entity, localId)
-                        refreshLocal()
+                        val isSessionRecord = record.type == "call" || record.type == "wp_call"
+                        val existing = if (isSessionRecord) db.dao().getById(localId) else null
+                        val newUpdatedAt = metadataJson.optLong("updatedAtMs", record.timestamp)
+                        val oldUpdatedAt = if (existing != null) {
+                            try {
+                                JSONObject(existing.metadataJson).optLong("updatedAtMs", existing.timestamp)
+                            } catch (_: Exception) {
+                                existing.timestamp
+                            }
+                        } else {
+                            Long.MIN_VALUE
+                        }
+
+                        if (!isSessionRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
+                            db.dao().insert(entity)
+                            receiverNotifications.post(entity, localId)
+                            refreshLocal()
+                        }
                         d.reference.delete()
                     }
                 } catch (ex: Exception) {
