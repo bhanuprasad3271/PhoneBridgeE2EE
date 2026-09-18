@@ -40,4 +40,12 @@ class BridgePrefs(ctx: Context) {
     var currentCallStartedAtMs: Long
         get() = p.getLong("currentCallStartedAtMs", 0L)
         set(v) = p.edit().putLong("currentCallStartedAtMs", v).apply()
+
+    var currentCallSessionId: String?
+        get() = p.getString("currentCallSessionId", null)
+        set(v) = p.edit().putString("currentCallSessionId", v).apply()
+
+    var currentCallNumber: String
+        get() = p.getString("currentCallNumber", "").orEmpty()
+        set(v) = p.edit().putString("currentCallNumber", v).apply()
 }
