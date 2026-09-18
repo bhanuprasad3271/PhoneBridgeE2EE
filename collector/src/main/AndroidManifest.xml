@@ -6,7 +6,7 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
-        android:label="PhoneBridge Collector"
+        android:label="PhoneBridge Sender"
         android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
 
         <activity
