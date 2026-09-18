@@ -33,13 +33,13 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
 
         val text = if (callGranted && phoneGranted) {
-            "Automatic call sync enabled"
+            "Live call sync enabled"
         } else {
-            "Call sync permissions are incomplete"
+            "Live call sync permissions are incomplete"
         }
         status.text = text
         dashboardStatus.text = text
-        reportCollectorState(force = true)
+        reportSenderState(force = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -97,7 +97,7 @@ class MainActivity : AppCompatActivity() {
                                 status.text = "Paired successfully"
                                 dashboardStatus.text = "Connected to Phone 1 · New activity only"
                                 showDashboard()
-                                reportCollectorState(force = true)
+                                reportSenderState(force = true)
                             } else {
                                 clearPendingPair()
                                 status.text = "Pairing failed. Check the 6-digit code and try again. ${e ?: ""}"
@@ -130,11 +130,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::prefs.isInitialized && prefs.pairId != null && prefs.receiverPublicKey != null) {
-            reportCollectorState(force = false)
+            reportSenderState(force = false)
         }
     }
 
-    private fun reportCollectorState(force: Boolean) {
+    private fun reportSenderState(force: Boolean) {
         if (prefs.pairId == null || prefs.receiverPublicKey == null) return
 
         val callGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED &&
@@ -156,9 +156,9 @@ class MainActivity : AppCompatActivity() {
                     PlainRecord(
                         type = "alert",
                         timestamp = System.currentTimeMillis(),
-                        source = "collector",
+                        source = "sender",
                         title = if (callGranted) "Automatic call sync active" else "Call sync permission missing",
-                        body = if (callGranted) "Phone 2 can automatically send new call-log entries after calls finish." else "Phone 2 needs Call Log and Phone State permissions for automatic call syncing.",
+                        body = if (callGranted) "Phone 2 can send live call-state updates and finalize calls from the call log." else "Phone 2 needs Call Log and Phone State permissions for automatic call syncing.",
                         metadata = mapOf("severity" to if (callGranted) "resolved" else "warning", "kind" to "call_permission")
                     )
                 )
@@ -171,7 +171,7 @@ class MainActivity : AppCompatActivity() {
                     PlainRecord(
                         type = "alert",
                         timestamp = System.currentTimeMillis(),
-                        source = "collector",
+                        source = "sender",
                         title = if (notifGranted) "Notification access active" else "Notification access disabled",
                         body = if (notifGranted) "Phone 2 can send permitted notification previews." else "Notification access must be enabled on Phone 2 to receive message and notification previews.",
                         metadata = mapOf("severity" to if (notifGranted) "resolved" else "warning", "kind" to "notification_access")
@@ -185,9 +185,9 @@ class MainActivity : AppCompatActivity() {
                     PlainRecord(
                         type = "status",
                         timestamp = System.currentTimeMillis(),
-                        source = "collector",
-                        title = "Collector app status",
-                        body = "Collector version $version is connected.",
+                        source = "sender",
+                        title = "Sender app status",
+                        body = "Sender version $version is connected.",
                         metadata = mapOf(
                             "appVersion" to version,
                             "callSync" to callState,
@@ -208,6 +208,10 @@ class MainActivity : AppCompatActivity() {
         prefs.lastCallPermissionState = null
         prefs.lastNotificationAccessState = null
         prefs.lastReportedVersion = null
+        prefs.currentCallStateHistory = ""
+        prefs.currentCallStartedAtMs = 0L
+        prefs.currentCallSessionId = null
+        prefs.currentCallNumber = ""
     }
 
     private fun showPairing() {
