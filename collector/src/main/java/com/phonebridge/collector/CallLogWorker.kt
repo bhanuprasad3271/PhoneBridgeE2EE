@@ -125,6 +125,7 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                             "durationSec" to durationSec.toString(),
                             "phoneAccountId" to accountId,
                             "startedAtMs" to date.toString(),
+                            "updatedAtMs" to System.currentTimeMillis().toString(),
                             "liveUpdate" to "false"
                         )
                     )
