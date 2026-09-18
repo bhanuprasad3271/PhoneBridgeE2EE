@@ -32,4 +32,12 @@ class BridgePrefs(ctx: Context) {
     var lastReportedVersion: String?
         get() = p.getString("lastReportedVersion", null)
         set(v) = p.edit().putString("lastReportedVersion", v).apply()
+
+    var currentCallStateHistory: String
+        get() = p.getString("currentCallStateHistory", "").orEmpty()
+        set(v) = p.edit().putString("currentCallStateHistory", v).apply()
+
+    var currentCallStartedAtMs: Long
+        get() = p.getLong("currentCallStartedAtMs", 0L)
+        set(v) = p.edit().putLong("currentCallStartedAtMs", v).apply()
 }
