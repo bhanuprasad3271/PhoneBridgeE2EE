@@ -204,9 +204,21 @@
                     android:id="@+id/btnWpCallsTab"
                     android:layout_width="126dp"
                     android:layout_height="56dp"
+                    android:layout_marginEnd="8dp"
                     android:background="@drawable/bg_tab_selector"
                     android:backgroundTint="@null"
                     android:text="WP Calls"
+                    android:textColor="#F8FAFC"
+                    android:textAllCaps="false"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btnLocationTab"
+                    android:layout_width="126dp"
+                    android:layout_height="56dp"
+                    android:background="@drawable/bg_tab_selector"
+                    android:backgroundTint="@null"
+                    android:text="Location"
                     android:textColor="#F8FAFC"
                     android:textAllCaps="false"
                     android:textStyle="bold" />
@@ -285,6 +297,70 @@
                     android:text="Filter"
                     android:textAllCaps="false"
                     android:textColor="#F8FAFC"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/locationPanel"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:padding="18dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/locationStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:text="Waiting for Sender location"
+                    android:textColor="#86EFAC"
+                    android:textSize="22sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/locationCoordinates"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:gravity="center"
+                    android:text="No location received yet"
+                    android:textColor="#F8FAFC"
+                    android:textSize="18sp"
+                    android:textIsSelectable="true" />
+
+                <TextView
+                    android:id="@+id/locationUpdated"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="Updated: —"
+                    android:textColor="#CBD5E1"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/locationAccuracy"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:gravity="center"
+                    android:text="Accuracy: —"
+                    android:textColor="#94A3B8"
+                    android:textSize="14sp" />
+
+                <Button
+                    android:id="@+id/btnOpenMaps"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="26dp"
+                    android:backgroundTint="#2563EB"
+                    android:enabled="false"
+                    android:text="Open in Google Maps"
+                    android:textColor="#FFFFFF"
+                    android:textAllCaps="false"
                     android:textStyle="bold" />
             </LinearLayout>
 
