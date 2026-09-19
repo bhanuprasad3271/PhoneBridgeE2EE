@@ -82,10 +82,11 @@ class ReceiverSyncWorker(
         val metadataJson = JSONObject(record.metadata)
         val sessionKey = metadataJson.optString("sessionKey")
 
-        val localId = if ((record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank()) {
-            record.type + "_" + sessionKey.hashCode()
-        } else {
-            id
+        val localId = when {
+            record.type == "location" -> "latest_location"
+            (record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank() ->
+                record.type + "_" + sessionKey.hashCode()
+            else -> id
         }
 
         val entity = RecordEntity(
@@ -98,8 +99,9 @@ class ReceiverSyncWorker(
             metadataJson = metadataJson.toString()
         )
 
-        val isSessionRecord = record.type == "call" || record.type == "wp_call"
-        val existing = if (isSessionRecord) db.dao().getById(localId) else null
+        val isReplaceableRecord =
+            record.type == "call" || record.type == "wp_call" || record.type == "location"
+        val existing = if (isReplaceableRecord) db.dao().getById(localId) else null
         val newUpdatedAt = metadataJson.optLong("updatedAtMs", record.timestamp)
         val oldUpdatedAt = if (existing != null) {
             try {
@@ -111,7 +113,7 @@ class ReceiverSyncWorker(
             Long.MIN_VALUE
         }
 
-        if (!isSessionRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
+        if (!isReplaceableRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
             db.dao().insert(entity)
         }
 
