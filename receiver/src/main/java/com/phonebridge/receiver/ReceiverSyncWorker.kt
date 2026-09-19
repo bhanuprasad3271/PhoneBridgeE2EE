@@ -28,7 +28,6 @@ class ReceiverSyncWorker(
     private val fs = FirebaseFirestore.getInstance()
     private val crypto = CryptoBox(appContext, "phonebridge_receiver_ecdh")
     private val db = Room.databaseBuilder(appContext, LocalDb::class.java, "phonebridge.db").build()
-    private val notifications = ReceiverNotifications(appContext)
 
     override suspend fun doWork(): Result {
         val prefs = applicationContext.getSharedPreferences("bridge", Context.MODE_PRIVATE)
@@ -114,9 +113,6 @@ class ReceiverSyncWorker(
 
         if (!isSessionRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
             db.dao().insert(entity)
-            // Storage always happens first. This method decides independently
-            // whether the Receiver user wants a local Android notification.
-            notifications.post(entity, localId)
         }
 
         fs.collection("pairs")
