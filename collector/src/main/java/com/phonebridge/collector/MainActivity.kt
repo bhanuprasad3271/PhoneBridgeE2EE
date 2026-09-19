@@ -154,20 +154,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         locationSharingButton.setOnClickListener {
-            if (prefs.locationSharingEnabled) {
-                AlertDialog.Builder(this)
-                    .setTitle("Stop location sharing?")
-                    .setMessage("PhoneBridge will stop collecting and sending background location updates.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Stop sharing") { _, _ ->
-                        prefs.locationSharingEnabled = false
-                        LocationSharingScheduler.cancel(this)
-                        updateLocationSharingUi()
-                        reportSenderState(force = true)
-                    }
-                    .show()
-            } else {
-                startLocationSharingSetup()
+            when {
+                prefs.locationSharingEnabled &&
+                    LocationSharingScheduler.hasBackgroundLocation(this) -> {
+                    AlertDialog.Builder(this)
+                        .setTitle("Stop location sharing?")
+                        .setMessage("PhoneBridge will stop collecting and sending background location updates.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Stop sharing") { _, _ ->
+                            prefs.locationSharingEnabled = false
+                            LocationSharingScheduler.cancel(this)
+                            updateLocationSharingUi()
+                            reportSenderState(force = true)
+                        }
+                        .show()
+                }
+
+                prefs.locationSharingEnabled &&
+                    LocationSharingScheduler.hasForegroundLocation(this) -> {
+                    showBackgroundLocationInstructions()
+                }
+
+                else -> {
+                    startLocationSharingSetup()
+                }
             }
         }
 
