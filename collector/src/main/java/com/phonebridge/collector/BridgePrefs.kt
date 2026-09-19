@@ -33,6 +33,14 @@ class BridgePrefs(ctx: Context) {
         get() = p.getString("lastReportedVersion", null)
         set(v) = p.edit().putString("lastReportedVersion", v).apply()
 
+    var locationSharingEnabled: Boolean
+        get() = p.getBoolean("locationSharingEnabled", false)
+        set(v) = p.edit().putBoolean("locationSharingEnabled", v).apply()
+
+    var lastLocationPermissionState: String?
+        get() = p.getString("lastLocationPermissionState", null)
+        set(v) = p.edit().putString("lastLocationPermissionState", v).apply()
+
     var currentCallStateHistory: String
         get() = p.getString("currentCallStateHistory", "").orEmpty()
         set(v) = p.edit().putString("currentCallStateHistory", v).apply()
