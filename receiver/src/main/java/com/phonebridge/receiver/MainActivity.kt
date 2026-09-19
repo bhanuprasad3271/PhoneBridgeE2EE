@@ -20,6 +20,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.room.Room
@@ -509,7 +510,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enqueueReceiverSync() {
-        WorkManager.getInstance(this).enqueue(
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            "receiver-foreground-sync",
+            ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
         )
     }
