@@ -1,13 +1,10 @@
 package com.phonebridge.receiver
 
-import android.Manifest
 import android.app.DatePickerDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -17,7 +14,6 @@ import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.ScrollView
 import android.widget.TextView
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -28,6 +24,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.room.Room
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.phonebridge.shared.CryptoBox
@@ -49,7 +46,6 @@ class MainActivity : AppCompatActivity() {
         Room.databaseBuilder(this, LocalDb::class.java, "phonebridge.db").build()
     }
     private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
-    private val receiverNotifications by lazy { ReceiverNotifications(this) }
 
     private lateinit var adapter: RecordAdapter
     private lateinit var status: TextView
@@ -68,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var filterButton: Button
 
     private var pairRegistration: ListenerRegistration? = null
+    private var queueRegistration: ListenerRegistration? = null
     private var updateReceiverRegistered = false
 
     private val dataUpdateReceiver = object : BroadcastReceiver() {
@@ -78,11 +75,6 @@ class MainActivity : AppCompatActivity() {
     private var currentFilter = "message"
     private var cachedRows: List<RecordEntity> = emptyList()
     private val sectionFilters = mutableMapOf<String, FilterCriteria>()
-    private var pendingSection: String? = null
-
-    private val notificationPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -102,10 +94,6 @@ class MainActivity : AppCompatActivity() {
         wpCallsButton = findViewById(R.id.btnWpCallsTab)
         menuButton = findViewById(R.id.btnMenu)
         filterButton = findViewById(R.id.btnFilter)
-
-        receiverNotifications.createChannels()
-        requestNotificationPermissionIfNeeded()
-        pendingSection = intent.getStringExtra(ReceiverNotifications.EXTRA_SECTION)
 
         adapter = RecordAdapter { record ->
             lifecycleScope.launch {
@@ -151,13 +139,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnCreatePair).setOnClickListener { createPairCode() }
     }
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        pendingSection = intent.getStringExtra(ReceiverNotifications.EXTRA_SECTION)
-        if (dashboardScreen.visibility == View.VISIBLE) applyPendingSection()
-    }
-
     override fun onStart() {
         super.onStart()
         if (!updateReceiverRegistered) {
@@ -170,9 +151,16 @@ class MainActivity : AppCompatActivity() {
             updateReceiverRegistered = true
         }
         lifecycleScope.launch { refreshLocal() }
+        if (auth.currentUser != null) {
+            prefs.getString("pairId", null)?.let { listen(it) }
+        }
     }
 
     override fun onStop() {
+        queueRegistration?.remove()
+        queueRegistration = null
+        pairRegistration?.remove()
+        pairRegistration = null
         if (updateReceiverRegistered) {
             unregisterReceiver(dataUpdateReceiver)
             updateReceiverRegistered = false
@@ -181,19 +169,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        queueRegistration?.remove()
         pairRegistration?.remove()
         super.onDestroy()
-    }
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            val np = getSharedPreferences(ReceiverNotifications.PREFS, MODE_PRIVATE)
-            if (np.getBoolean(ReceiverNotifications.KEY_MASTER, true)) {
-                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            }
-        }
     }
 
     private fun selectTab(filter: String, title: String) {
@@ -209,29 +187,13 @@ class MainActivity : AppCompatActivity() {
         applyFilter()
     }
 
-    private fun applyPendingSection() {
-        when (pendingSection) {
-            "message" -> selectTab("message", "Messages")
-            "call" -> selectTab("call", "Calls")
-            "notification" -> selectTab("notification", "Notifications")
-            "wp_call" -> selectTab("wp_call", "WP Calls")
-            "alert" -> selectTab("alert", "Alerts / Device Status")
-        }
-        pendingSection = null
-    }
-
     private fun showSettingsMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
-            menu.add(0, 4, 0, "Notification Settings")
-            menu.add(0, 1, 1, "Pair another phone")
-            menu.add(0, 2, 2, "Reset pairing")
-            menu.add(0, 3, 3, "Remove pairing")
+            menu.add(0, 1, 0, "Pair another phone")
+            menu.add(0, 2, 1, "Reset pairing")
+            menu.add(0, 3, 2, "Remove pairing")
             setOnMenuItemClickListener { item ->
                 when (item.itemId) {
-                    4 -> {
-                        showNotificationSettings()
-                        true
-                    }
                     1 -> {
                         confirmPairAnother()
                         true
@@ -386,86 +348,6 @@ class MainActivity : AppCompatActivity() {
         filterButton.text = if (active) "Filter •" else "Filter"
     }
 
-    private fun showNotificationSettings() {
-        val np = getSharedPreferences(ReceiverNotifications.PREFS, MODE_PRIVATE)
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(40, 12, 40, 12)
-        }
-
-        fun check(label: String, key: String, default: Boolean = true): CheckBox {
-            return CheckBox(this).apply {
-                text = label
-                isChecked = np.getBoolean(key, default)
-                box.addView(this)
-            }
-        }
-
-        val master = check("Local notifications", ReceiverNotifications.KEY_MASTER)
-        val messages = check("Messages", ReceiverNotifications.KEY_MESSAGES)
-        val calls = check("Calls", ReceiverNotifications.KEY_CALLS)
-        val notifications = check("Notifications", ReceiverNotifications.KEY_NOTIFICATIONS)
-        val wpCalls = check("WP Calls", ReceiverNotifications.KEY_WP_CALLS)
-        val alerts = check("Sender alerts", ReceiverNotifications.KEY_ALERTS)
-        val hideContent = check("Hide notification content", ReceiverNotifications.KEY_HIDE_CONTENT, false)
-
-        box.addView(TextView(this).apply {
-            text = "Optional notification filters"
-            setPadding(0, 18, 0, 4)
-        })
-
-        fun edit(hint: String, key: String): EditText {
-            return EditText(this).apply {
-                this.hint = hint
-                setText(np.getString(key, "").orEmpty())
-                box.addView(this)
-            }
-        }
-
-        val app = edit("Only app containing…", ReceiverNotifications.KEY_APP_FILTER)
-        val contact = edit("Only contact/name containing…", ReceiverNotifications.KEY_CONTACT_FILTER)
-        val number = edit("Only number containing…", ReceiverNotifications.KEY_NUMBER_FILTER)
-        val username = edit("Only username containing…", ReceiverNotifications.KEY_USERNAME_FILTER)
-
-        box.addView(TextView(this).apply {
-            text = "Call notification types"
-            setPadding(0, 18, 0, 4)
-        })
-        val incoming = check("Incoming", ReceiverNotifications.KEY_INCOMING)
-        val outgoing = check("Outgoing", ReceiverNotifications.KEY_OUTGOING)
-        val missed = check("Missed", ReceiverNotifications.KEY_MISSED)
-        val rejected = check("Rejected", ReceiverNotifications.KEY_REJECTED)
-
-        val scroll = ScrollView(this).apply { addView(box) }
-
-        AlertDialog.Builder(this)
-            .setTitle("Notification Settings")
-            .setView(scroll)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Save") { _, _ ->
-                np.edit()
-                    .putBoolean(ReceiverNotifications.KEY_MASTER, master.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_MESSAGES, messages.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_CALLS, calls.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_NOTIFICATIONS, notifications.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_WP_CALLS, wpCalls.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_ALERTS, alerts.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_HIDE_CONTENT, hideContent.isChecked)
-                    .putString(ReceiverNotifications.KEY_APP_FILTER, app.text.toString().trim())
-                    .putString(ReceiverNotifications.KEY_CONTACT_FILTER, contact.text.toString().trim())
-                    .putString(ReceiverNotifications.KEY_NUMBER_FILTER, number.text.toString().trim())
-                    .putString(ReceiverNotifications.KEY_USERNAME_FILTER, username.text.toString().trim())
-                    .putBoolean(ReceiverNotifications.KEY_INCOMING, incoming.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_OUTGOING, outgoing.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_MISSED, missed.isChecked)
-                    .putBoolean(ReceiverNotifications.KEY_REJECTED, rejected.isChecked)
-                    .apply()
-
-                if (master.isChecked) requestNotificationPermissionIfNeeded()
-            }
-            .show()
-    }
-
     private fun confirmPairAnother() {
         AlertDialog.Builder(this)
             .setTitle("Pair another phone?")
@@ -560,6 +442,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun listen(pairId: String) {
         pairRegistration?.remove()
+        queueRegistration?.remove()
+        queueRegistration = null
 
         val pairRef = fs.collection("pairs").document(pairId)
         pairRegistration = pairRef.addSnapshotListener { pairSnap, err ->
@@ -592,6 +476,8 @@ class MainActivity : AppCompatActivity() {
         val pairId = prefs.getString("pairId", null)
         pairRegistration?.remove()
         pairRegistration = null
+        queueRegistration?.remove()
+        queueRegistration = null
         fun finish() {
             prefs.edit().remove("pairId").apply()
             after()
@@ -606,6 +492,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPairing() {
+        queueRegistration?.remove()
+        queueRegistration = null
         pairingScreen.visibility = View.VISIBLE
         dashboardScreen.visibility = View.GONE
     }
@@ -614,13 +502,37 @@ class MainActivity : AppCompatActivity() {
         pairingScreen.visibility = View.GONE
         dashboardScreen.visibility = View.VISIBLE
 
-        FcmRegistration.registerCurrentToken(this)
+        enqueueReceiverSync()
+        startQueueListener()
+
+        lifecycleScope.launch { refreshLocal() }
+    }
+
+    private fun enqueueReceiverSync() {
         WorkManager.getInstance(this).enqueue(
             OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
         )
+    }
 
-        lifecycleScope.launch { refreshLocal() }
-        applyPendingSection()
+    private fun startQueueListener() {
+        if (queueRegistration != null) return
+        val pairId = prefs.getString("pairId", null) ?: return
+
+        queueRegistration = fs.collection("pairs")
+            .document(pairId)
+            .collection("queue")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    dashboardStatus.text = "Connected to Sender • sync will retry when reopened"
+                    return@addSnapshotListener
+                }
+
+                val hasNewData = snapshot?.documentChanges?.any {
+                    it.type == DocumentChange.Type.ADDED || it.type == DocumentChange.Type.MODIFIED
+                } == true
+
+                if (hasNewData) enqueueReceiverSync()
+            }
     }
 
     private fun applyFilter() {
