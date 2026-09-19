@@ -1,10 +1,12 @@
 package com.phonebridge.receiver
 
+import android.app.ActivityNotFoundException
 import android.app.DatePickerDialog
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -61,8 +63,16 @@ class MainActivity : AppCompatActivity() {
     private lateinit var callsButton: Button
     private lateinit var notificationsButton: Button
     private lateinit var wpCallsButton: Button
+    private lateinit var locationButton: Button
     private lateinit var menuButton: Button
     private lateinit var filterButton: Button
+    private lateinit var recordList: RecyclerView
+    private lateinit var locationPanel: View
+    private lateinit var locationStatus: TextView
+    private lateinit var locationCoordinates: TextView
+    private lateinit var locationUpdated: TextView
+    private lateinit var locationAccuracy: TextView
+    private lateinit var openMapsButton: Button
 
     private var pairRegistration: ListenerRegistration? = null
     private var queueRegistration: ListenerRegistration? = null
@@ -75,6 +85,7 @@ class MainActivity : AppCompatActivity() {
     }
     private var currentFilter = "message"
     private var cachedRows: List<RecordEntity> = emptyList()
+    private var latestLocation: RecordEntity? = null
     private val sectionFilters = mutableMapOf<String, FilterCriteria>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -93,8 +104,15 @@ class MainActivity : AppCompatActivity() {
         callsButton = findViewById(R.id.btnCallsTab)
         notificationsButton = findViewById(R.id.btnNotificationsTab)
         wpCallsButton = findViewById(R.id.btnWpCallsTab)
+        locationButton = findViewById(R.id.btnLocationTab)
         menuButton = findViewById(R.id.btnMenu)
         filterButton = findViewById(R.id.btnFilter)
+        locationPanel = findViewById(R.id.locationPanel)
+        locationStatus = findViewById(R.id.locationStatus)
+        locationCoordinates = findViewById(R.id.locationCoordinates)
+        locationUpdated = findViewById(R.id.locationUpdated)
+        locationAccuracy = findViewById(R.id.locationAccuracy)
+        openMapsButton = findViewById(R.id.btnOpenMaps)
 
         adapter = RecordAdapter { record ->
             lifecycleScope.launch {
@@ -102,7 +120,7 @@ class MainActivity : AppCompatActivity() {
                 refreshLocal()
             }
         }
-        findViewById<RecyclerView>(R.id.list).apply {
+        recordList = findViewById<RecyclerView>(R.id.list).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = this@MainActivity.adapter
         }
@@ -111,9 +129,11 @@ class MainActivity : AppCompatActivity() {
         callsButton.setOnClickListener { selectTab("call", "Calls") }
         notificationsButton.setOnClickListener { selectTab("notification", "Notifications") }
         wpCallsButton.setOnClickListener { selectTab("wp_call", "WP Calls") }
+        locationButton.setOnClickListener { selectTab("location", "Location") }
         alertsButton.setOnClickListener { selectTab("alert", "Alerts / Device Status") }
         menuButton.setOnClickListener { showSettingsMenu(it) }
         filterButton.setOnClickListener { showFilterDialog() }
+        openMapsButton.setOnClickListener { openLatestLocationInMaps() }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
             lifecycleScope.launch {
@@ -178,14 +198,25 @@ class MainActivity : AppCompatActivity() {
     private fun selectTab(filter: String, title: String) {
         currentFilter = filter
         listTitle.text = title
+        val isLocation = filter == "location"
+
         alertsToolbar.visibility = if (filter == "alert") View.VISIBLE else View.GONE
-        filterButton.visibility = if (filter == "alert") View.GONE else View.VISIBLE
+        filterButton.visibility = if (filter == "alert" || isLocation) View.GONE else View.VISIBLE
+        locationPanel.visibility = if (isLocation) View.VISIBLE else View.GONE
+        recordList.visibility = if (isLocation) View.GONE else View.VISIBLE
+
         messagesButton.isSelected = filter == "message"
         callsButton.isSelected = filter == "call"
         notificationsButton.isSelected = filter == "notification"
         wpCallsButton.isSelected = filter == "wp_call"
+        locationButton.isSelected = isLocation
+
         updateFilterButton()
-        applyFilter()
+        if (isLocation) {
+            refreshLocationView()
+        } else {
+            applyFilter()
+        }
     }
 
     private fun showSettingsMenu(anchor: View) {
@@ -546,6 +577,7 @@ class MainActivity : AppCompatActivity() {
             }
             "message" -> cachedRows.filter { it.type == "message" }
             "wp_call" -> cachedRows.filter { it.type == "wp_call" }
+            "location" -> emptyList()
             "alert" -> cachedRows.filter { it.type == "alert" || it.type == "status" }
             else -> cachedRows
         }
@@ -559,6 +591,8 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun refreshLocal() {
         cachedRows = withContext(Dispatchers.IO) { db.dao().all() }
+        latestLocation = cachedRows.firstOrNull { it.type == "location" }
+
         val warningCount = cachedRows.count {
             if (it.type != "alert") return@count false
             try {
@@ -568,6 +602,85 @@ class MainActivity : AppCompatActivity() {
             }
         }
         alertsButton.text = if (warningCount > 0) "🔔 " + warningCount else "🔔"
-        applyFilter()
+
+        if (currentFilter == "location") {
+            refreshLocationView()
+        } else {
+            applyFilter()
+        }
+    }
+
+    private fun refreshLocationView() {
+        val record = latestLocation
+        if (record == null) {
+            locationStatus.text = "Waiting for Sender location"
+            locationCoordinates.text = "No location received yet"
+            locationUpdated.text = "Updated: —"
+            locationAccuracy.text = "Accuracy: —"
+            openMapsButton.isEnabled = false
+            return
+        }
+
+        val meta = try {
+            JSONObject(record.metadataJson)
+        } catch (_: Exception) {
+            JSONObject()
+        }
+
+        val latitude = meta.optString("latitude")
+        val longitude = meta.optString("longitude")
+        val accuracy = meta.optString("accuracyMeters")
+        val ageMs = (System.currentTimeMillis() - record.timestamp).coerceAtLeast(0L)
+
+        locationStatus.text = when {
+            ageMs < 5 * 60 * 1000L -> "Live"
+            ageMs <= 30 * 60 * 1000L -> "Recent"
+            else -> "Old location"
+        }
+
+        locationCoordinates.text = if (latitude.isNotBlank() && longitude.isNotBlank()) {
+            "$latitude, $longitude"
+        } else {
+            "Location data unavailable"
+        }
+
+        locationUpdated.text = "Updated: " +
+            SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
+                .format(Date(record.timestamp))
+
+        locationAccuracy.text = if (accuracy.isNotBlank()) {
+            "Accuracy: ±$accuracy m"
+        } else {
+            "Accuracy: —"
+        }
+
+        openMapsButton.isEnabled = latitude.toDoubleOrNull() != null &&
+            longitude.toDoubleOrNull() != null
+    }
+
+    private fun openLatestLocationInMaps() {
+        val record = latestLocation ?: return
+        val meta = try {
+            JSONObject(record.metadataJson)
+        } catch (_: Exception) {
+            return
+        }
+
+        val latitude = meta.optString("latitude").toDoubleOrNull() ?: return
+        val longitude = meta.optString("longitude").toDoubleOrNull() ?: return
+        val label = Uri.encode("Sender location")
+        val geoUri = Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude($label)")
+
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, geoUri)
+                    .setPackage("com.google.android.apps.maps")
+            )
+        } catch (_: ActivityNotFoundException) {
+            val webUri = Uri.parse(
+                "https://www.google.com/maps/search/?api=1&query=$latitude,$longitude"
+            )
+            startActivity(Intent(Intent.ACTION_VIEW, webUri))
+        }
     }
 }

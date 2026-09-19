@@ -110,6 +110,27 @@
                 android:layout_height="wrap_content"
                 android:text="Enable Automatic Call Sync" />
 
+            <TextView
+                android:id="@+id/locationSharingStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="Location sharing is off"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btnLocationSharing"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Enable Location Sharing" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="Location sharing is optional. When enabled, PhoneBridge periodically sends the latest encrypted location to the paired Receiver until you turn it off."
+                android:textSize="12sp" />
+
             <Button
                 android:id="@+id/btnSync"
                 android:layout_width="match_parent"
