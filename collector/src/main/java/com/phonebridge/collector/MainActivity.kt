@@ -262,7 +262,7 @@ class MainActivity : AppCompatActivity() {
                 locationSharingButton.text = "Enable Location Sharing"
             }
             backgroundGranted -> {
-                locationSharingStatus.text = "Location sharing active · encrypted update about every 30 minutes"
+                locationSharingStatus.text = "Location sharing active · encrypted update about every 15 minutes"
                 locationSharingButton.text = "Stop Location Sharing"
                 LocationSharingScheduler.schedule(this)
             }
