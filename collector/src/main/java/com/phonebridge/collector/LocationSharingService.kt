@@ -112,7 +112,11 @@ class LocationSharingService : Service() {
                     if (requestId.isBlank()) return@addSnapshotListener
                     if (requestId == prefs.lastHandledLocationRequestId) return@addSnapshotListener
 
-                    updateRequestStatus(requestId, "sender_received")
+                    val statusId = snapshot.getString("locationRequestStatusId").orEmpty()
+                    val status = snapshot.getString("locationRequestStatus").orEmpty()
+                    if (statusId != requestId || status == "requested") {
+                        updateRequestStatus(requestId, "sender_received")
+                    }
                     requestFreshLocation(
                         reason = "manual_refresh",
                         receiverRequestId = requestId
