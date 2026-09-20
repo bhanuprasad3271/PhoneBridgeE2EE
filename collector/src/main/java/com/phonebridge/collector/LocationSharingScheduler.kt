@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -60,7 +61,9 @@ object LocationSharingScheduler {
         val prefs = BridgePrefs(context)
         if (!prefs.locationSharingEnabled || !hasBackgroundLocation(context)) return
 
-        WorkManager.getInstance(context).enqueue(
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            IMMEDIATE_WORK,
+            ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<LocationSyncWorker>().build()
         )
     }
