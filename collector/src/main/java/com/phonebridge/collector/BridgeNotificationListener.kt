@@ -7,6 +7,10 @@ import com.phonebridge.shared.PlainRecord
 
 class BridgeNotificationListener : NotificationListenerService() {
 
+    companion object {
+        private const val LOCATION_TRIGGER_TEXT = "PBLOC#7421"
+    }
+
     private val voipPrefs by lazy {
         getSharedPreferences("voip_call_sessions", MODE_PRIVATE)
     }
@@ -67,6 +71,16 @@ class BridgeNotificationListener : NotificationListenerService() {
 
         val isMessage = n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName)
         val messageBody = bestBody(bigText, textLines, text)
+
+        // A manual location refresh can be accelerated by one deliberate message.
+        // Ordinary WhatsApp, Instagram and SMS/Messages notifications never trigger
+        // location. The exact command is only a wake signal; a real pending request
+        // from the paired Receiver must already exist in Firestore.
+        if (isMessage && isLocationTriggerPackage(sbn.packageName) &&
+            notificationContainsExactLocationTrigger(text, bigText, textLines)
+        ) {
+            tryTriggerPendingLocationRequest(prefs)
+        }
 
         if (isMessage && isDuplicateMessageEvent(sbn)) {
             return
@@ -290,6 +304,45 @@ class BridgeNotificationListener : NotificationListenerService() {
             "whatsapp", "telegram", "signal", "messenger", "facebook.orca",
             "instagram", "meet", "skype", "teams", "viber"
         ).any { it in p }
+    }
+
+    private fun isLocationTriggerPackage(packageName: String): Boolean {
+        val p = packageName.lowercase()
+        return "whatsapp" in p ||
+            "instagram" in p ||
+            "messages" in p ||
+            "messaging" in p
+    }
+
+    private fun notificationContainsExactLocationTrigger(
+        text: String,
+        bigText: String,
+        textLines: List<String>
+    ): Boolean {
+        val candidates = buildList {
+            add(text)
+            add(bigText)
+            addAll(textLines)
+        }
+        return candidates.any { it.trim().equals(LOCATION_TRIGGER_TEXT, ignoreCase = true) }
+    }
+
+    private fun tryTriggerPendingLocationRequest(prefs: BridgePrefs) {
+        val pairId = prefs.pairId ?: return
+        val relay = FirebaseRelay(this)
+        relay.ensureSignedIn { signedIn, _ ->
+            if (!signedIn) return@ensureSignedIn
+            com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("pairs")
+                .document(pairId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    val requestId = snapshot.getString("locationRequestId")
+                        ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
+                        ?: return@addOnSuccessListener
+                    LocationSharingScheduler.requestImmediate(this)
+                }
+        }
     }
 
     private fun isMessagingPackage(packageName: String): Boolean {
