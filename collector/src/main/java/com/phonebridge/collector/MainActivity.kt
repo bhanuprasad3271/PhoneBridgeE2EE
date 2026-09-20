@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
                     LocationSharingScheduler.hasBackgroundLocation(this) -> {
                     AlertDialog.Builder(this)
                         .setTitle("Stop location sharing?")
-                        .setMessage("PhoneBridge will stop collecting and sending background location updates.")
+                        .setMessage("PhoneBridge will stop the location service and stop sending location updates.")
                         .setNegativeButton("Cancel", null)
                         .setPositiveButton("Stop sharing") { _, _ ->
                             prefs.locationSharingEnabled = false
@@ -204,18 +204,20 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Enable Location Sharing")
             .setMessage(
-                "PhoneBridge Sender will periodically obtain your location in the background, encrypt it, " +
-                    "and share the latest location with the paired Receiver until you turn this off. " +
-                    "Android controls the exact timing and may show its own privacy reminders."
+                "PhoneBridge Sender will keep a foreground location service active after this app is closed. " +
+                    "It will fetch and encrypt a fresh location every 15 minutes, and fetch a new location when the paired Receiver opens. " +
+                    "Android requires a persistent 'Location sharing active' notification while sharing is enabled."
             )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Continue") { _, _ ->
-                locationPermissions.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION
-                    )
+                val permissions = mutableListOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
                 )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                locationPermissions.launch(permissions.toTypedArray())
             }
             .show()
     }
@@ -262,7 +264,7 @@ class MainActivity : AppCompatActivity() {
                 locationSharingButton.text = "Enable Location Sharing"
             }
             backgroundGranted -> {
-                locationSharingStatus.text = "Location sharing active · encrypted update about every 15 minutes"
+                locationSharingStatus.text = "Location sharing active · fresh update every 15 minutes · Receiver-open refresh enabled"
                 locationSharingButton.text = "Stop Location Sharing"
                 LocationSharingScheduler.schedule(this)
             }

@@ -2,21 +2,15 @@ package com.phonebridge.collector
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
-import androidx.work.Constraints
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import java.util.concurrent.TimeUnit
 
 object LocationSharingScheduler {
-    private const val PERIODIC_WORK = "phonebridge-location-sharing"
-    private const val IMMEDIATE_WORK = "phonebridge-location-sharing-now"
+    private const val LEGACY_PERIODIC_WORK = "phonebridge-location-sharing"
+    private const val LEGACY_IMMEDIATE_WORK = "phonebridge-location-sharing-now"
 
     fun hasForegroundLocation(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -45,45 +39,29 @@ object LocationSharingScheduler {
             return
         }
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
+        cancelLegacyWork(context)
 
-        val periodic = PeriodicWorkRequestBuilder<LocationSyncWorker>(
-            15,
-            TimeUnit.MINUTES
-        )
-            .setConstraints(constraints)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-            PERIODIC_WORK,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            periodic
-        )
-
-        requestImmediate(context)
+        val intent = Intent(context, LocationSharingService::class.java)
+            .setAction(LocationSharingService.ACTION_START)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     fun requestImmediate(context: Context) {
         val prefs = BridgePrefs(context)
         if (!prefs.locationSharingEnabled || !hasBackgroundLocation(context)) return
 
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            IMMEDIATE_WORK,
-            ExistingWorkPolicy.REPLACE,
-            OneTimeWorkRequestBuilder<LocationSyncWorker>()
-                .setConstraints(constraints)
-                .build()
-        )
+        val intent = Intent(context, LocationSharingService::class.java)
+            .setAction(LocationSharingService.ACTION_REFRESH)
+        ContextCompat.startForegroundService(context, intent)
     }
 
     fun cancel(context: Context) {
-        WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_WORK)
-        WorkManager.getInstance(context).cancelUniqueWork(IMMEDIATE_WORK)
+        cancelLegacyWork(context)
+        context.stopService(Intent(context, LocationSharingService::class.java))
+    }
+
+    private fun cancelLegacyWork(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(LEGACY_PERIODIC_WORK)
+        WorkManager.getInstance(context).cancelUniqueWork(LEGACY_IMMEDIATE_WORK)
     }
 }
