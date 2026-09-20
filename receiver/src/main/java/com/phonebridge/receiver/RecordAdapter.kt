@@ -91,6 +91,32 @@ class RecordAdapter(
                 h.body.text = r.body
                 h.meta.text = whenText
             }
+            "location" -> {
+                val latitude = metaJson.optString("latitude")
+                val longitude = metaJson.optString("longitude")
+                val accuracy = metaJson.optString("accuracyMeters")
+                val trigger = metaJson.optString("trigger")
+                h.title.text = whenText
+                h.body.text = if (latitude.isNotBlank() && longitude.isNotBlank()) {
+                    "$latitude, $longitude"
+                } else {
+                    "Location data unavailable"
+                }
+                h.meta.text = buildString {
+                    if (accuracy.isNotBlank()) append("Accuracy: ±").append(accuracy).append(" m")
+                    if (trigger.isNotBlank()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(
+                            when (trigger) {
+                                "receiver_open" -> "Receiver opened"
+                                "periodic" -> "15-minute update"
+                                "service_start" -> "Sharing started"
+                                else -> trigger
+                            }
+                        )
+                    }
+                }
+            }
             else -> {
                 h.title.text = r.title
                 h.body.text = r.body
