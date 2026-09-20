@@ -3,13 +3,9 @@ package com.phonebridge.collector
 import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.ListenerRegistration
 import com.phonebridge.shared.PlainRecord
 
 class BridgeNotificationListener : NotificationListenerService() {
-
-    private var locationRequestRegistration: ListenerRegistration? = null
 
     private val voipPrefs by lazy {
         getSharedPreferences("voip_call_sessions", MODE_PRIVATE)
@@ -21,62 +17,12 @@ class BridgeNotificationListener : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        startLocationRequestListener()
         sendAlert("Notification access active", "Notification access is enabled on the Sender.", "resolved")
     }
 
     override fun onListenerDisconnected() {
-        locationRequestRegistration?.remove()
-        locationRequestRegistration = null
         sendAlert("Notification access disabled", "Notification access is not active on the Sender.", "warning")
         super.onListenerDisconnected()
-    }
-
-    override fun onDestroy() {
-        locationRequestRegistration?.remove()
-        locationRequestRegistration = null
-        super.onDestroy()
-    }
-
-    private fun startLocationRequestListener() {
-        locationRequestRegistration?.remove()
-        locationRequestRegistration = null
-
-        val prefs = BridgePrefs(this)
-        val pairId = prefs.pairId ?: return
-        if (prefs.receiverPublicKey == null) return
-
-        val relay = FirebaseRelay(this)
-        relay.ensureSignedIn { ok, _ ->
-            if (!ok) return@ensureSignedIn
-
-            locationRequestRegistration = FirebaseFirestore.getInstance()
-                .collection("pairs")
-                .document(pairId)
-                .addSnapshotListener { snapshot, error ->
-                    if (error != null || snapshot == null || !snapshot.exists()) {
-                        return@addSnapshotListener
-                    }
-
-                    val requestId = snapshot.getString("locationRequestId").orEmpty()
-                    val requestedAt = snapshot.getLong("locationRequestedAtMs") ?: 0L
-                    val now = System.currentTimeMillis()
-
-                    if (requestId.isBlank()) return@addSnapshotListener
-                    if (requestId == prefs.lastHandledLocationRequestId) return@addSnapshotListener
-                    if (requestedAt <= 0L || now - requestedAt > 10 * 60 * 1000L) {
-                        return@addSnapshotListener
-                    }
-                    if (!prefs.locationSharingEnabled ||
-                        !LocationSharingScheduler.hasBackgroundLocation(this)
-                    ) {
-                        return@addSnapshotListener
-                    }
-
-                    prefs.lastHandledLocationRequestId = requestId
-                    LocationSharingScheduler.requestImmediate(this)
-                }
-        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
