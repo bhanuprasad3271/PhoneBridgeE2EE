@@ -199,7 +199,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
-        freshLocationRequestedThisStart = false
         queueRegistration?.remove()
         queueRegistration = null
         pairRegistration?.remove()
