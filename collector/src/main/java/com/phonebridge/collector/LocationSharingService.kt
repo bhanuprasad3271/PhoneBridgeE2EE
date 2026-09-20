@@ -112,8 +112,13 @@ class LocationSharingService : Service() {
                     if (requestId.isBlank()) return@addSnapshotListener
                     if (requestId == prefs.lastHandledLocationRequestId) return@addSnapshotListener
 
+                    val statusId = snapshot.getString("locationRequestStatusId").orEmpty()
+                    val status = snapshot.getString("locationRequestStatus").orEmpty()
+                    if (statusId != requestId || status == "requested") {
+                        updateRequestStatus(requestId, "sender_received")
+                    }
                     requestFreshLocation(
-                        reason = "receiver_open",
+                        reason = "manual_refresh",
                         receiverRequestId = requestId
                     )
                 }
@@ -125,6 +130,7 @@ class LocationSharingService : Service() {
         receiverRequestId: String? = null
     ) {
         if (!canShareLocation()) {
+            updateRequestStatus(receiverRequestId, "location_failed")
             stopSelf()
             return
         }
@@ -140,11 +146,13 @@ class LocationSharingService : Service() {
 
         val locationManager = getSystemService(LocationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !locationManager.isLocationEnabled) {
+            updateRequestStatus(receiverRequestId, "location_unavailable")
             finishFetch(receiverRequestId)
             return
         }
 
         fetchInProgress = true
+        updateRequestStatus(receiverRequestId, "getting_location")
         val tokenSource = CancellationTokenSource()
         cancellationTokenSource = tokenSource
 
@@ -158,18 +166,23 @@ class LocationSharingService : Service() {
             fused.getCurrentLocation(request, tokenSource.token)
                 .addOnSuccessListener { location ->
                     if (location == null) {
+                        updateRequestStatus(receiverRequestId, "location_failed")
                         finishFetch(receiverRequestId)
                     } else {
+                        updateRequestStatus(receiverRequestId, "encrypting_sending")
                         sendLocation(location, reason, receiverRequestId)
                     }
                 }
                 .addOnFailureListener {
+                    updateRequestStatus(receiverRequestId, "location_failed")
                     finishFetch(receiverRequestId)
                 }
                 .addOnCanceledListener {
+                    updateRequestStatus(receiverRequestId, "location_failed")
                     finishFetch(receiverRequestId)
                 }
         } catch (_: SecurityException) {
+            updateRequestStatus(receiverRequestId, "location_failed")
             finishFetch(receiverRequestId)
         }
     }
@@ -203,12 +216,18 @@ class LocationSharingService : Service() {
                         "provider" to (location.provider ?: "fused"),
                         "locationTimeMs" to timestamp.toString(),
                         "collectedAtMs" to now.toString(),
-                        "trigger" to reason
+                        "trigger" to reason,
+                        "requestId" to (receiverRequestId ?: "")
                     )
                 )
             ) { sent, _ ->
-                if (sent && receiverRequestId != null) {
-                    prefs.lastHandledLocationRequestId = receiverRequestId
+                if (receiverRequestId != null) {
+                    if (sent) {
+                        prefs.lastHandledLocationRequestId = receiverRequestId
+                        updateRequestStatus(receiverRequestId, "sent")
+                    } else {
+                        updateRequestStatus(receiverRequestId, "send_failed")
+                    }
                 }
                 finishFetch(receiverRequestId)
             }
@@ -227,7 +246,7 @@ class LocationSharingService : Service() {
             pendingReceiverRequestId = null
             handler.post {
                 requestFreshLocation(
-                    reason = "receiver_open",
+                    reason = "manual_refresh",
                     receiverRequestId = pendingRequest
                 )
             }
@@ -240,6 +259,22 @@ class LocationSharingService : Service() {
             pendingPeriodicRefresh = false
             handler.post { requestFreshLocation(reason = "periodic") }
         }
+    }
+
+    private fun updateRequestStatus(requestId: String?, status: String) {
+        if (requestId.isNullOrBlank()) return
+        val pairId = prefs.pairId ?: return
+
+        FirebaseFirestore.getInstance()
+            .collection("pairs")
+            .document(pairId)
+            .update(
+                mapOf(
+                    "locationRequestStatusId" to requestId,
+                    "locationRequestStatus" to status,
+                    "locationRequestStatusAtMs" to System.currentTimeMillis()
+                )
+            )
     }
 
     private fun createNotificationChannel() {
