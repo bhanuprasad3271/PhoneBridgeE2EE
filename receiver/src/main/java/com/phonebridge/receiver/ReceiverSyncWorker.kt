@@ -83,7 +83,6 @@ class ReceiverSyncWorker(
         val sessionKey = metadataJson.optString("sessionKey")
 
         val localId = when {
-            record.type == "location" -> "latest_location"
             (record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank() ->
                 record.type + "_" + sessionKey.hashCode()
             else -> id
@@ -100,7 +99,7 @@ class ReceiverSyncWorker(
         )
 
         val isReplaceableRecord =
-            record.type == "call" || record.type == "wp_call" || record.type == "location"
+            record.type == "call" || record.type == "wp_call"
         val existing = if (isReplaceableRecord) db.dao().getById(localId) else null
         val newUpdatedAt = metadataJson.optLong("updatedAtMs", record.timestamp)
         val oldUpdatedAt = if (existing != null) {
@@ -117,6 +116,10 @@ class ReceiverSyncWorker(
             db.dao().insert(entity)
         }
 
+        // Delivery acknowledgement: the Firebase queue item is removed only after
+        // this exact record has been successfully persisted in Room. If Room save
+        // fails, execution throws before this point and Firestore keeps the record
+        // for the next Receiver sync attempt.
         fs.collection("pairs")
             .document(pairId)
             .collection("queue")
