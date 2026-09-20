@@ -68,6 +68,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var locationButton: Button
     private lateinit var menuButton: Button
     private lateinit var filterButton: Button
+    private lateinit var locationRefreshButton: Button
+    private lateinit var locationRefreshProgress: TextView
+    private lateinit var locationHistoryTitle: TextView
+    private lateinit var locationHistoryEmpty: TextView
     private lateinit var recordList: RecyclerView
     private lateinit var locationHistoryList: RecyclerView
     private lateinit var locationPanel: View
@@ -80,7 +84,8 @@ class MainActivity : AppCompatActivity() {
     private var pairRegistration: ListenerRegistration? = null
     private var queueRegistration: ListenerRegistration? = null
     private var updateReceiverRegistered = false
-    private var freshLocationRequestedThisStart = false
+    private var activeLocationRefreshRequestId: String? = null
+    private var locationRefreshStage = 0
 
     private val dataUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -111,6 +116,10 @@ class MainActivity : AppCompatActivity() {
         locationButton = findViewById(R.id.btnLocationTab)
         menuButton = findViewById(R.id.btnMenu)
         filterButton = findViewById(R.id.btnFilter)
+        locationRefreshButton = findViewById(R.id.btnLocationRefresh)
+        locationRefreshProgress = findViewById(R.id.locationRefreshProgress)
+        locationHistoryTitle = findViewById(R.id.locationHistoryTitle)
+        locationHistoryEmpty = findViewById(R.id.locationHistoryEmpty)
         locationPanel = findViewById(R.id.locationPanel)
         locationStatus = findViewById(R.id.locationStatus)
         locationCoordinates = findViewById(R.id.locationCoordinates)
@@ -144,6 +153,7 @@ class MainActivity : AppCompatActivity() {
         alertsButton.setOnClickListener { selectTab("alert", "Alerts / Device Status") }
         menuButton.setOnClickListener { showSettingsMenu(it) }
         filterButton.setOnClickListener { showFilterDialog() }
+        locationRefreshButton.setOnClickListener { requestFreshLocationManually() }
         openMapsButton.setOnClickListener { openLatestLocationInMaps() }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
@@ -173,7 +183,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
-        freshLocationRequestedThisStart = false
         if (!updateReceiverRegistered) {
             ContextCompat.registerReceiver(
                 this,
@@ -215,6 +224,7 @@ class MainActivity : AppCompatActivity() {
 
         alertsToolbar.visibility = if (filter == "alert") View.VISIBLE else View.GONE
         filterButton.visibility = if (filter == "alert" || isLocation) View.GONE else View.VISIBLE
+        locationRefreshButton.visibility = if (isLocation) View.VISIBLE else View.GONE
         locationPanel.visibility = if (isLocation) View.VISIBLE else View.GONE
         recordList.visibility = if (isLocation) View.GONE else View.VISIBLE
 
@@ -504,6 +514,11 @@ class MainActivity : AppCompatActivity() {
                 return@addSnapshotListener
             }
 
+            handleLocationRefreshStatus(
+                pairSnap.getString("locationRequestStatusId"),
+                pairSnap.getString("locationRequestStatus")
+            )
+
             val collectorKey = pairSnap.getString("collectorPublicKeyB64")
             if (collectorKey.isNullOrBlank()) {
                 showPairing()
@@ -549,31 +564,74 @@ class MainActivity : AppCompatActivity() {
 
         enqueueReceiverSync()
         startQueueListener()
-        requestFreshLocationIfNeeded()
 
         lifecycleScope.launch { refreshLocal() }
     }
 
-    private fun requestFreshLocationIfNeeded() {
-        if (freshLocationRequestedThisStart) return
+    private fun requestFreshLocationManually() {
         val pairId = prefs.getString("pairId", null) ?: return
+        if (activeLocationRefreshRequestId != null) return
 
-        freshLocationRequestedThisStart = true
         val requestId = UUID.randomUUID().toString()
-        val now = System.currentTimeMillis()
+        activeLocationRefreshRequestId = requestId
+        locationRefreshStage = 1
+        locationRefreshButton.isEnabled = false
+        locationRefreshProgress.text = "Request sent → waiting for Sender…"
 
         fs.collection("pairs")
             .document(pairId)
             .update(
                 mapOf(
                     "locationRequestId" to requestId,
-                    "locationRequestedAtMs" to now
+                    "locationRequestedAtMs" to System.currentTimeMillis(),
+                    "locationRequestStatusId" to requestId,
+                    "locationRequestStatus" to "requested",
+                    "locationRequestStatusAtMs" to System.currentTimeMillis()
                 )
             )
             .addOnFailureListener {
-                dashboardStatus.text =
-                    "Connected to Sender • fresh location request unavailable; showing latest"
+                activeLocationRefreshRequestId = null
+                locationRefreshStage = 0
+                locationRefreshButton.isEnabled = true
+                locationRefreshProgress.text = "Refresh request failed · tap ↻ to retry"
             }
+    }
+
+    private fun handleLocationRefreshStatus(requestId: String?, status: String?) {
+        val activeId = activeLocationRefreshRequestId ?: return
+        if (requestId != activeId || status.isNullOrBlank()) return
+
+        val stage = when (status) {
+            "requested" -> 1
+            "sender_received" -> 2
+            "getting_location" -> 3
+            "encrypting_sending" -> 4
+            "sent" -> 5
+            "receiver_saved" -> 6
+            "location_unavailable", "location_failed", "send_failed" -> 99
+            else -> return
+        }
+
+        if (stage != 99 && stage < locationRefreshStage) return
+        locationRefreshStage = stage
+
+        locationRefreshProgress.text = when (status) {
+            "requested" -> "Request sent → waiting for Sender…"
+            "sender_received" -> "Request sent → Sender received"
+            "getting_location" -> "Request sent → Sender received → getting fresh location…"
+            "encrypting_sending" -> "Sender received → GPS received → encrypting & sending…"
+            "sent" -> "Fresh location sent → waiting for Receiver save…"
+            "receiver_saved" -> "✓ Fresh location received → saved to history"
+            "location_unavailable" -> "Sender received → device Location is off"
+            "location_failed" -> "Sender received → fresh location unavailable"
+            "send_failed" -> "GPS received → encrypted upload failed"
+            else -> locationRefreshProgress.text
+        }
+
+        if (stage == 6 || stage == 99) {
+            activeLocationRefreshRequestId = null
+            locationRefreshButton.isEnabled = true
+        }
     }
 
     private fun enqueueReceiverSync() {
@@ -630,6 +688,26 @@ class MainActivity : AppCompatActivity() {
         val locationRows = cachedRows.filter { it.type == "location" }
         latestLocation = locationRows.firstOrNull()
         locationHistoryAdapter.submit(locationRows)
+        locationHistoryTitle.text = "Location history · " + locationRows.size
+        locationHistoryEmpty.visibility = if (locationRows.isEmpty()) View.VISIBLE else View.GONE
+        locationHistoryList.visibility = if (locationRows.isEmpty()) View.GONE else View.VISIBLE
+
+        val activeRequestId = activeLocationRefreshRequestId
+        if (activeRequestId != null) {
+            val savedForRequest = locationRows.firstOrNull { row ->
+                try {
+                    JSONObject(row.metadataJson).optString("requestId") == activeRequestId
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            if (savedForRequest != null) {
+                locationRefreshStage = 6
+                locationRefreshProgress.text = "✓ Fresh location received → saved to history"
+                activeLocationRefreshRequestId = null
+                locationRefreshButton.isEnabled = true
+            }
+        }
 
         val warningCount = cachedRows.count {
             if (it.type != "alert") return@count false
