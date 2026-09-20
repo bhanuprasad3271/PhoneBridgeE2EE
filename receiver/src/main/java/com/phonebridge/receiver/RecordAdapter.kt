@@ -108,7 +108,8 @@ class RecordAdapter(
                         if (isNotEmpty()) append(" · ")
                         append(
                             when (trigger) {
-                                "receiver_open" -> "Receiver opened"
+                                "receiver_open" -> "Manual refresh"
+                                "manual_refresh" -> "Manual refresh"
                                 "periodic" -> "15-minute update"
                                 "service_start" -> "Sharing started"
                                 else -> trigger

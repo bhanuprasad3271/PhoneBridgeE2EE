@@ -116,6 +116,24 @@ class ReceiverSyncWorker(
             db.dao().insert(entity)
         }
 
+        val locationRequestId = if (record.type == "location") {
+            metadataJson.optString("requestId")
+        } else {
+            ""
+        }
+        if (locationRequestId.isNotBlank()) {
+            fs.collection("pairs")
+                .document(pairId)
+                .update(
+                    mapOf(
+                        "locationRequestStatusId" to locationRequestId,
+                        "locationRequestStatus" to "receiver_saved",
+                        "locationRequestStatusAtMs" to System.currentTimeMillis()
+                    )
+                )
+                .await()
+        }
+
         // Delivery acknowledgement: the Firebase queue item is removed only after
         // this exact record has been successfully persisted in Room. If Room save
         // fails, execution throws before this point and Firestore keeps the record

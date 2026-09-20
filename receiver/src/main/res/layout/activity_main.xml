@@ -286,6 +286,20 @@
                     android:textStyle="bold" />
 
                 <Button
+                    android:id="@+id/btnLocationRefresh"
+                    android:layout_width="48dp"
+                    android:layout_height="42dp"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:backgroundTint="#2563EB"
+                    android:text="↻"
+                    android:textAllCaps="false"
+                    android:textColor="#FFFFFF"
+                    android:textSize="22sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <Button
                     android:id="@+id/btnFilter"
                     android:layout_width="wrap_content"
                     android:layout_height="42dp"
@@ -309,6 +323,18 @@
                 android:gravity="center_horizontal"
                 android:padding="18dp"
                 android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/locationRefreshProgress"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:minHeight="48dp"
+                    android:padding="10dp"
+                    android:gravity="center"
+                    android:background="#334155"
+                    android:text="Ready · tap ↻ to request a fresh location"
+                    android:textColor="#CBD5E1"
+                    android:textSize="13sp" />
 
                 <TextView
                     android:id="@+id/locationStatus"
@@ -364,14 +390,26 @@
                     android:textStyle="bold" />
 
                 <TextView
+                    android:id="@+id/locationHistoryTitle"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="22dp"
-                    android:layout_marginBottom="10dp"
-                    android:text="Location history"
+                    android:layout_marginBottom="8dp"
+                    android:text="Location history · 0"
                     android:textColor="#F8FAFC"
                     android:textSize="17sp"
                     android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/locationHistoryEmpty"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="10dp"
+                    android:gravity="center"
+                    android:padding="14dp"
+                    android:text="No location history received yet"
+                    android:textColor="#94A3B8"
+                    android:textSize="14sp" />
 
                 <androidx.recyclerview.widget.RecyclerView
                     android:id="@+id/locationHistoryList"
