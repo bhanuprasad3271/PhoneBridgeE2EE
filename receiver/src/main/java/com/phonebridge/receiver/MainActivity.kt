@@ -40,6 +40,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
     private val auth by lazy { FirebaseAuth.getInstance() }
@@ -77,6 +78,7 @@ class MainActivity : AppCompatActivity() {
     private var pairRegistration: ListenerRegistration? = null
     private var queueRegistration: ListenerRegistration? = null
     private var updateReceiverRegistered = false
+    private var freshLocationRequestedThisStart = false
 
     private val dataUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -162,6 +164,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        freshLocationRequestedThisStart = false
         if (!updateReceiverRegistered) {
             ContextCompat.registerReceiver(
                 this,
@@ -178,6 +181,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        freshLocationRequestedThisStart = false
         queueRegistration?.remove()
         queueRegistration = null
         pairRegistration?.remove()
@@ -536,8 +540,31 @@ class MainActivity : AppCompatActivity() {
 
         enqueueReceiverSync()
         startQueueListener()
+        requestFreshLocationIfNeeded()
 
         lifecycleScope.launch { refreshLocal() }
+    }
+
+    private fun requestFreshLocationIfNeeded() {
+        if (freshLocationRequestedThisStart) return
+        val pairId = prefs.getString("pairId", null) ?: return
+
+        freshLocationRequestedThisStart = true
+        val requestId = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+
+        fs.collection("pairs")
+            .document(pairId)
+            .update(
+                mapOf(
+                    "locationRequestId" to requestId,
+                    "locationRequestedAtMs" to now
+                )
+            )
+            .addOnFailureListener {
+                dashboardStatus.text =
+                    "Connected to Sender • fresh location request unavailable; showing latest"
+            }
     }
 
     private fun enqueueReceiverSync() {
