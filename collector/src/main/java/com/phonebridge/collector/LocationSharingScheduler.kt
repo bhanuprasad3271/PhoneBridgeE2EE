@@ -62,6 +62,17 @@ object LocationSharingScheduler {
             periodic
         )
 
+        requestImmediate(context)
+    }
+
+    fun requestImmediate(context: Context) {
+        val prefs = BridgePrefs(context)
+        if (!prefs.locationSharingEnabled || !hasBackgroundLocation(context)) return
+
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
         WorkManager.getInstance(context).enqueueUniqueWork(
             IMMEDIATE_WORK,
             ExistingWorkPolicy.REPLACE,

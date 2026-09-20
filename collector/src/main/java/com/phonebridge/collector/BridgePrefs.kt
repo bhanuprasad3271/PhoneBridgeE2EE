@@ -41,6 +41,10 @@ class BridgePrefs(ctx: Context) {
         get() = p.getString("lastLocationPermissionState", null)
         set(v) = p.edit().putString("lastLocationPermissionState", v).apply()
 
+    var lastHandledLocationRequestId: String?
+        get() = p.getString("lastHandledLocationRequestId", null)
+        set(v) = p.edit().putString("lastHandledLocationRequestId", v).apply()
+
     var currentCallStateHistory: String
         get() = p.getString("currentCallStateHistory", "").orEmpty()
         set(v) = p.edit().putString("currentCallStateHistory", v).apply()
