@@ -275,3 +275,4 @@ class LocationSharingService : Service() {
                 )
             )
             .build()
+}
