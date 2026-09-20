@@ -50,7 +50,7 @@ object LocationSharingScheduler {
             .build()
 
         val periodic = PeriodicWorkRequestBuilder<LocationSyncWorker>(
-            30,
+            15,
             TimeUnit.MINUTES
         )
             .setConstraints(constraints)
