@@ -52,6 +52,7 @@ class MainActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
 
     private lateinit var adapter: RecordAdapter
+    private lateinit var locationHistoryAdapter: RecordAdapter
     private lateinit var status: TextView
     private lateinit var dashboardStatus: TextView
     private lateinit var pairCodeText: TextView
@@ -68,6 +69,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var menuButton: Button
     private lateinit var filterButton: Button
     private lateinit var recordList: RecyclerView
+    private lateinit var locationHistoryList: RecyclerView
     private lateinit var locationPanel: View
     private lateinit var locationStatus: TextView
     private lateinit var locationCoordinates: TextView
@@ -115,6 +117,7 @@ class MainActivity : AppCompatActivity() {
         locationUpdated = findViewById(R.id.locationUpdated)
         locationAccuracy = findViewById(R.id.locationAccuracy)
         openMapsButton = findViewById(R.id.btnOpenMaps)
+        locationHistoryList = findViewById(R.id.locationHistoryList)
 
         adapter = RecordAdapter { record ->
             lifecycleScope.launch {
@@ -125,6 +128,12 @@ class MainActivity : AppCompatActivity() {
         recordList = findViewById<RecyclerView>(R.id.list).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = this@MainActivity.adapter
+        }
+
+        locationHistoryAdapter = RecordAdapter()
+        locationHistoryList.apply {
+            layoutManager = LinearLayoutManager(this@MainActivity)
+            adapter = locationHistoryAdapter
         }
 
         messagesButton.setOnClickListener { selectTab("message", "Messages") }
@@ -618,7 +627,9 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun refreshLocal() {
         cachedRows = withContext(Dispatchers.IO) { db.dao().all() }
-        latestLocation = cachedRows.firstOrNull { it.type == "location" }
+        val locationRows = cachedRows.filter { it.type == "location" }
+        latestLocation = locationRows.firstOrNull()
+        locationHistoryAdapter.submit(locationRows)
 
         val warningCount = cachedRows.count {
             if (it.type != "alert") return@count false

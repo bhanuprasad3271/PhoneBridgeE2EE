@@ -362,6 +362,24 @@
                     android:textColor="#FFFFFF"
                     android:textAllCaps="false"
                     android:textStyle="bold" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="22dp"
+                    android:layout_marginBottom="10dp"
+                    android:text="Location history"
+                    android:textColor="#F8FAFC"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/locationHistoryList"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:clipToPadding="false"
+                    android:paddingBottom="8dp" />
             </LinearLayout>
 
             <androidx.recyclerview.widget.RecyclerView
