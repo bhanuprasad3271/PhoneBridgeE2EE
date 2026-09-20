@@ -204,9 +204,9 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Enable Location Sharing")
             .setMessage(
-                "PhoneBridge Sender will keep a foreground location service active after this app is closed. " +
-                    "It will fetch and encrypt a fresh location every 15 minutes, and fetch a new location when the paired Receiver opens. " +
-                    "Android requires a persistent 'Location sharing active' notification while sharing is enabled."
+                "PhoneBridge Sender will use Android background work for occasional location sharing after this app is closed. " +
+                    "It will request an encrypted location about every 15 minutes when Android allows background work. " +
+                    "Updates are best-effort and can be delayed by Android battery/Doze restrictions; no continuous location foreground service is kept running."
             )
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Continue") { _, _ ->
@@ -226,7 +226,7 @@ class MainActivity : AppCompatActivity() {
         AlertDialog.Builder(this)
             .setTitle("Allow background location")
             .setMessage(
-                "To keep sharing after Sender is closed, Android requires 'Allow all the time'. " +
+                "For occasional sharing after Sender is closed, Android requires 'Allow all the time'. " +
                     "On the next screen open Permissions > Location and choose Allow all the time, then return to PhoneBridge."
             )
             .setNegativeButton("Not now") { _, _ -> updateLocationSharingUi() }
@@ -264,7 +264,7 @@ class MainActivity : AppCompatActivity() {
                 locationSharingButton.text = "Enable Location Sharing"
             }
             backgroundGranted -> {
-                locationSharingStatus.text = "Location sharing active · fresh update every 15 minutes · Receiver-open refresh enabled"
+                locationSharingStatus.text = "Occasional location sharing active · Android schedules ~15-minute background checks · updates may be delayed"
                 locationSharingButton.text = "Stop Location Sharing"
                 LocationSharingScheduler.schedule(this)
             }
