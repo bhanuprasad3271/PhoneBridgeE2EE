@@ -111,6 +111,7 @@ class RecordAdapter(
                                 "receiver_open" -> "Manual refresh"
                                 "manual_refresh" -> "Manual refresh"
                                 "periodic" -> "15-minute update"
+                                "special_text" -> "Special text request"
                                 "service_start" -> "Sharing started"
                                 else -> trigger
                             }

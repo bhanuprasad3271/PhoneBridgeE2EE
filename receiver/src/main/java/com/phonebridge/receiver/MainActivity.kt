@@ -75,6 +75,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var locationTriggerButton: Button
     private lateinit var locationRefreshProgress: TextView
     private lateinit var locationHistoryTitle: TextView
+    private lateinit var locationTimelineButton: Button
     private lateinit var locationHistoryEmpty: TextView
     private lateinit var recordList: RecyclerView
     private lateinit var locationHistoryList: RecyclerView
@@ -93,7 +94,10 @@ class MainActivity : AppCompatActivity() {
 
     private val dataUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            lifecycleScope.launch { refreshLocal() }
+            lifecycleScope.launch {
+            purgeExpiredLocations()
+            refreshLocal()
+        }
         }
     }
     private var currentFilter = "message"
@@ -124,6 +128,7 @@ class MainActivity : AppCompatActivity() {
         locationTriggerButton = findViewById(R.id.btnLocationTriggerText)
         locationRefreshProgress = findViewById(R.id.locationRefreshProgress)
         locationHistoryTitle = findViewById(R.id.locationHistoryTitle)
+        locationTimelineButton = findViewById(R.id.btnLocationTimeline)
         locationHistoryEmpty = findViewById(R.id.locationHistoryEmpty)
         locationPanel = findViewById(R.id.locationPanel)
         locationStatus = findViewById(R.id.locationStatus)
@@ -161,6 +166,9 @@ class MainActivity : AppCompatActivity() {
         locationRefreshButton.setOnClickListener { requestFreshLocationManually() }
         locationTriggerButton.setOnClickListener { showLocationTriggerEditor() }
         openMapsButton.setOnClickListener { openLatestLocationInMaps() }
+        locationTimelineButton.setOnClickListener {
+            startActivity(Intent(this, LocationTimelineActivity::class.java))
+        }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
             lifecycleScope.launch {
@@ -220,6 +228,11 @@ class MainActivity : AppCompatActivity() {
         queueRegistration?.remove()
         pairRegistration?.remove()
         super.onDestroy()
+    }
+
+    private suspend fun purgeExpiredLocations() {
+        val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
+        withContext(Dispatchers.IO) { db.dao().deleteLocationsOlderThan(cutoff) }
     }
 
     private fun selectTab(filter: String, title: String) {

@@ -406,16 +406,38 @@
                     android:textAllCaps="false"
                     android:textStyle="bold" />
 
-                <TextView
-                    android:id="@+id/locationHistoryTitle"
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="22dp"
                     android:layout_marginBottom="8dp"
-                    android:text="Location history · 0"
-                    android:textColor="#F8FAFC"
-                    android:textSize="17sp"
-                    android:textStyle="bold" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/locationHistoryTitle"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Location history · 0"
+                        android:textColor="#F8FAFC"
+                        android:textSize="17sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btnLocationTimeline"
+                        android:layout_width="wrap_content"
+                        android:layout_height="38dp"
+                        android:minHeight="0dp"
+                        android:minWidth="0dp"
+                        android:backgroundTint="#475569"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:text="Timeline 📍"
+                        android:textAllCaps="false"
+                        android:textColor="#F8FAFC"
+                        android:textSize="13sp" />
+                </LinearLayout>
 
                 <TextView
                     android:id="@+id/locationHistoryEmpty"
