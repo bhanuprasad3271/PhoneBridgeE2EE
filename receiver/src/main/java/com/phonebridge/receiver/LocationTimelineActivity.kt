@@ -25,7 +25,7 @@ import org.mapsforge.map.datastore.MapDataStore
 import org.mapsforge.map.layer.cache.TileCache
 import org.mapsforge.map.layer.renderer.TileRendererLayer
 import org.mapsforge.map.reader.MapFile
-import org.mapsforge.map.rendertheme.InternalRenderTheme
+import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 import org.mapsforge.map.layer.overlay.Polyline
 import java.io.File
 import java.text.SimpleDateFormat
@@ -90,7 +90,8 @@ class LocationTimelineActivity : AppCompatActivity() {
                     contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
                         ?: return@withContext false
                     // Validate with the same local parser before replacing the active map.
-                    MapFile(temp).use { }
+                    val validationMap = MapFile(temp)
+                    validationMap.close()
                     val target = File(dir, "phonebridge.map")
                     if (target.exists()) target.delete()
                     temp.renameTo(target)
@@ -115,7 +116,7 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapDataStore = MapFile(file)
             tileCache = AndroidUtil.createTileCache(this, "timeline-map", mapView.model.displayModel.tileSize, 1f, mapView.model.frameBufferModel.overdrawFactor)
             rendererLayer = TileRendererLayer(tileCache, mapDataStore, mapView.model.mapViewPosition, AndroidGraphicFactory.INSTANCE).also {
-                it.setXmlRenderTheme(InternalRenderTheme.DEFAULT)
+                it.setXmlRenderTheme(MapsforgeThemes.DEFAULT)
                 mapView.layerManager.layers.add(it)
             }
             mapStatus.visibility = View.GONE
@@ -165,8 +166,8 @@ class LocationTimelineActivity : AppCompatActivity() {
         if (latLongs.size > 1) {
             val paint: Paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
                 color = AndroidGraphicFactory.INSTANCE.createColor(255, 37, 99, 235)
-                strokeWidth = 8f
-                style = Style.STROKE
+                setStrokeWidth(8f)
+                setStyle(Style.STROKE)
             }
             routeLayer = Polyline(paint, AndroidGraphicFactory.INSTANCE).also {
                 it.latLongs.addAll(latLongs)
