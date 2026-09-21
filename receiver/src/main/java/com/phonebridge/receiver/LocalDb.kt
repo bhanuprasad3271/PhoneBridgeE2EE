@@ -29,6 +29,12 @@ interface RecordDao {
 
     @Query("DELETE FROM records WHERE type = :type")
     suspend fun deleteByType(type: String)
+
+    @Query("SELECT * FROM records WHERE type = 'location' AND timestamp >= :fromMs AND timestamp <= :toMs ORDER BY timestamp ASC")
+    suspend fun locationsBetween(fromMs: Long, toMs: Long): List<RecordEntity>
+
+    @Query("DELETE FROM records WHERE type = 'location' AND timestamp < :cutoffMs")
+    suspend fun deleteLocationsOlderThan(cutoffMs: Long)
 }
 
 @Database(entities = [RecordEntity::class], version = 1)
