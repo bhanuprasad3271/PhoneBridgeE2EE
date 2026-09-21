@@ -10,6 +10,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import java.util.concurrent.TimeUnit
 
 object LocationSharingScheduler {
@@ -57,14 +58,18 @@ object LocationSharingScheduler {
         )
     }
 
-    fun requestImmediate(context: Context) {
+    fun requestImmediate(context: Context, trigger: String = "manual_refresh") {
         val prefs = BridgePrefs(context)
         if (!prefs.locationSharingEnabled || !hasBackgroundLocation(context)) return
+
+        val request = OneTimeWorkRequestBuilder<LocationSyncWorker>()
+            .setInputData(workDataOf("locationTrigger" to trigger))
+            .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
             IMMEDIATE_WORK,
             ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<LocationSyncWorker>().build()
+            request
         )
     }
 
