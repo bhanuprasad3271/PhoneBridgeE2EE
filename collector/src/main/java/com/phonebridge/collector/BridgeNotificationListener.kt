@@ -8,7 +8,7 @@ import com.phonebridge.shared.PlainRecord
 class BridgeNotificationListener : NotificationListenerService() {
 
     companion object {
-        private const val LOCATION_TRIGGER_TEXT = "PBLOC#7421"
+        private const val DEFAULT_LOCATION_TRIGGER = "PBLOC#7421"
     }
 
     private val voipPrefs by lazy {
@@ -76,10 +76,8 @@ class BridgeNotificationListener : NotificationListenerService() {
         // Ordinary WhatsApp, Instagram and SMS/Messages notifications never trigger
         // location. The exact command is only a wake signal; a real pending request
         // from the paired Receiver must already exist in Firestore.
-        if (isMessage && isLocationTriggerPackage(sbn.packageName) &&
-            notificationContainsExactLocationTrigger(text, bigText, textLines)
-        ) {
-            tryTriggerPendingLocationRequest(prefs)
+        if (isMessage && isLocationTriggerPackage(sbn.packageName)) {
+            tryTriggerPendingLocationRequest(prefs, text, bigText, textLines)
         }
 
         if (isMessage && isDuplicateMessageEvent(sbn)) {
@@ -314,21 +312,20 @@ class BridgeNotificationListener : NotificationListenerService() {
             "messaging" in p
     }
 
-    private fun notificationContainsExactLocationTrigger(
+    private fun tryTriggerPendingLocationRequest(
+        prefs: BridgePrefs,
         text: String,
         bigText: String,
         textLines: List<String>
-    ): Boolean {
+    ) {
+        val pairId = prefs.pairId ?: return
         val candidates = buildList {
             add(text)
             add(bigText)
             addAll(textLines)
-        }
-        return candidates.any { it.trim().equals(LOCATION_TRIGGER_TEXT, ignoreCase = true) }
-    }
+        }.map { it.trim() }.filter { it.isNotEmpty() }
+        if (candidates.isEmpty()) return
 
-    private fun tryTriggerPendingLocationRequest(prefs: BridgePrefs) {
-        val pairId = prefs.pairId ?: return
         val relay = FirebaseRelay(this)
         relay.ensureSignedIn { signedIn, _ ->
             if (!signedIn) return@ensureSignedIn
@@ -337,6 +334,14 @@ class BridgeNotificationListener : NotificationListenerService() {
                 .document(pairId)
                 .get()
                 .addOnSuccessListener { snapshot ->
+                    val trigger = snapshot.getString("locationTriggerText")
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: DEFAULT_LOCATION_TRIGGER
+                    if (candidates.none { it.equals(trigger, ignoreCase = true) }) {
+                        return@addOnSuccessListener
+                    }
+
                     val requestId = snapshot.getString("locationRequestId")
                         ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
                         ?: return@addOnSuccessListener
