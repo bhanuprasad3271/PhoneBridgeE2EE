@@ -33,7 +33,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.10.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
     // Offline-only vector map rendering. No map API key or online tile service.
-    implementation("org.mapsforge:mapsforge-map-android:0.26.0")
-    implementation("org.mapsforge:mapsforge-map-reader:0.26.0")
+    implementation("org.mapsforge:mapsforge-map-android:0.25.0")
+    implementation("org.mapsforge:mapsforge-map-reader:0.25.0")
     kapt("androidx.room:room-compiler:2.8.5")
 }
