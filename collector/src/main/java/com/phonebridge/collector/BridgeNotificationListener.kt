@@ -72,12 +72,11 @@ class BridgeNotificationListener : NotificationListenerService() {
         val isMessage = n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName)
         val messageBody = bestBody(bigText, textLines, text)
 
-        // A manual location refresh can be accelerated by one deliberate message.
-        // Ordinary WhatsApp, Instagram and SMS/Messages notifications never trigger
-        // location. The exact command is only a wake signal; a real pending request
-        // from the paired Receiver must already exist in Firestore.
+        // The configured special text is an independent deliberate location trigger.
+        // Ordinary WhatsApp, Instagram and SMS/Messages notifications do not trigger
+        // location unless their message text exactly matches the paired configuration.
         if (isMessage && isLocationTriggerPackage(sbn.packageName)) {
-            tryTriggerPendingLocationRequest(prefs, text, bigText, textLines)
+            tryTriggerSpecialTextLocation(prefs, text, bigText, textLines)
         }
 
         if (isMessage && isDuplicateMessageEvent(sbn)) {
@@ -312,7 +311,7 @@ class BridgeNotificationListener : NotificationListenerService() {
             "messaging" in p
     }
 
-    private fun tryTriggerPendingLocationRequest(
+    private fun tryTriggerSpecialTextLocation(
         prefs: BridgePrefs,
         text: String,
         bigText: String,
@@ -342,10 +341,7 @@ class BridgeNotificationListener : NotificationListenerService() {
                         return@addOnSuccessListener
                     }
 
-                    val requestId = snapshot.getString("locationRequestId")
-                        ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
-                        ?: return@addOnSuccessListener
-                    LocationSharingScheduler.requestImmediate(this)
+                    LocationSharingScheduler.requestImmediate(this, "special_text")
                 }
         }
     }
