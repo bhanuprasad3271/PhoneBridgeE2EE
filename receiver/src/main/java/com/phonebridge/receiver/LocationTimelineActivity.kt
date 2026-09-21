@@ -2,6 +2,8 @@ package com.phonebridge.receiver
 
 import android.app.DatePickerDialog
 import android.os.Bundle
+import android.net.Uri
+import androidx.activity.result.contract.ActivityResultContracts
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
@@ -42,6 +44,9 @@ class LocationTimelineActivity : AppCompatActivity() {
     private var rendererLayer: TileRendererLayer? = null
     private var routeLayer: Polyline? = null
     private val selected = Calendar.getInstance()
+    private val importMap = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri != null) importOfflineMap(uri)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -54,6 +59,9 @@ class LocationTimelineActivity : AppCompatActivity() {
         mapView.isClickable = true
         mapView.setBuiltInZoomControls(true)
         mapView.mapScaleBar.isVisible = true
+        findViewById<Button>(R.id.btnImportOfflineMap).setOnClickListener {
+            importMap.launch(arrayOf("application/octet-stream", "application/*"))
+        }
         openOfflineMap()
 
         findViewById<Button>(R.id.btnTimelineBack).setOnClickListener { finish() }
@@ -71,6 +79,31 @@ class LocationTimelineActivity : AppCompatActivity() {
      * It does not fetch tiles, geocode, route, map-match, or transmit timeline coordinates.
      * Put a downloaded file at filesDir/offline-maps/phonebridge.map.
      */
+    private fun importOfflineMap(uri: Uri) {
+        lifecycleScope.launch {
+            mapStatus.visibility = View.VISIBLE
+            mapStatus.text = "Importing offline map…"
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val dir = File(filesDir, "offline-maps").apply { mkdirs() }
+                    val temp = File(dir, "phonebridge.map.tmp")
+                    contentResolver.openInputStream(uri)?.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+                        ?: return@withContext false
+                    // Validate with the same local parser before replacing the active map.
+                    MapFile(temp).use { }
+                    val target = File(dir, "phonebridge.map")
+                    if (target.exists()) target.delete()
+                    temp.renameTo(target)
+                } catch (_: Exception) { false }
+            }
+            if (ok) {
+                mapStatus.text = "Offline map imported · reopen Timeline to load it"
+            } else {
+                mapStatus.text = "Invalid or unsupported .map file"
+            }
+        }
+    }
+
     private fun openOfflineMap() {
         val file = File(File(filesDir, "offline-maps"), "phonebridge.map")
         if (!file.isFile) {
