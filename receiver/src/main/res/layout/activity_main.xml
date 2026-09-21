@@ -286,6 +286,23 @@
                     android:textStyle="bold" />
 
                 <Button
+                    android:id="@+id/btnLocationTriggerText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="42dp"
+                    android:layout_marginEnd="8dp"
+                    android:minHeight="0dp"
+                    android:minWidth="0dp"
+                    android:backgroundTint="#475569"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:text="PBLOC#7421"
+                    android:textAllCaps="false"
+                    android:textColor="#F8FAFC"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:visibility="gone" />
+
+                <Button
                     android:id="@+id/btnLocationRefresh"
                     android:layout_width="48dp"
                     android:layout_height="42dp"

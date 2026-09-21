@@ -43,6 +43,9 @@ import java.util.Locale
 import java.util.UUID
 
 class MainActivity : AppCompatActivity() {
+    companion object {
+        private const val DEFAULT_LOCATION_TRIGGER = "PBLOC#7421"
+    }
     private val auth by lazy { FirebaseAuth.getInstance() }
     private val fs by lazy { FirebaseFirestore.getInstance() }
     private val crypto by lazy { CryptoBox(this, "phonebridge_receiver_ecdh") }
@@ -69,6 +72,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var menuButton: Button
     private lateinit var filterButton: Button
     private lateinit var locationRefreshButton: Button
+    private lateinit var locationTriggerButton: Button
     private lateinit var locationRefreshProgress: TextView
     private lateinit var locationHistoryTitle: TextView
     private lateinit var locationHistoryEmpty: TextView
@@ -117,6 +121,7 @@ class MainActivity : AppCompatActivity() {
         menuButton = findViewById(R.id.btnMenu)
         filterButton = findViewById(R.id.btnFilter)
         locationRefreshButton = findViewById(R.id.btnLocationRefresh)
+        locationTriggerButton = findViewById(R.id.btnLocationTriggerText)
         locationRefreshProgress = findViewById(R.id.locationRefreshProgress)
         locationHistoryTitle = findViewById(R.id.locationHistoryTitle)
         locationHistoryEmpty = findViewById(R.id.locationHistoryEmpty)
@@ -154,6 +159,7 @@ class MainActivity : AppCompatActivity() {
         menuButton.setOnClickListener { showSettingsMenu(it) }
         filterButton.setOnClickListener { showFilterDialog() }
         locationRefreshButton.setOnClickListener { requestFreshLocationManually() }
+        locationTriggerButton.setOnClickListener { showLocationTriggerEditor() }
         openMapsButton.setOnClickListener { openLatestLocationInMaps() }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
@@ -224,6 +230,7 @@ class MainActivity : AppCompatActivity() {
         alertsToolbar.visibility = if (filter == "alert") View.VISIBLE else View.GONE
         filterButton.visibility = if (filter == "alert" || isLocation) View.GONE else View.VISIBLE
         locationRefreshButton.visibility = if (isLocation) View.VISIBLE else View.GONE
+        locationTriggerButton.visibility = if (isLocation) View.VISIBLE else View.GONE
         locationPanel.visibility = if (isLocation) View.VISIBLE else View.GONE
         recordList.visibility = if (isLocation) View.GONE else View.VISIBLE
 
@@ -460,7 +467,8 @@ class MainActivity : AppCompatActivity() {
             "collectorUid" to null,
             "collectorPublicKeyB64" to null,
             "createdAtMs" to now,
-            "expiresAtMs" to now + 10 * 60 * 1000L
+            "expiresAtMs" to now + 10 * 60 * 1000L,
+            "locationTriggerText" to DEFAULT_LOCATION_TRIGGER
         )
 
         pairCodeText.text = code
@@ -517,6 +525,11 @@ class MainActivity : AppCompatActivity() {
                 pairSnap.getString("locationRequestStatusId"),
                 pairSnap.getString("locationRequestStatus")
             )
+            val triggerText = pairSnap.getString("locationTriggerText")
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() }
+                ?: DEFAULT_LOCATION_TRIGGER
+            locationTriggerButton.text = triggerText
 
             val collectorKey = pairSnap.getString("collectorPublicKeyB64")
             if (collectorKey.isNullOrBlank()) {
@@ -565,6 +578,44 @@ class MainActivity : AppCompatActivity() {
         startQueueListener()
 
         lifecycleScope.launch { refreshLocal() }
+    }
+
+    private fun showLocationTriggerEditor() {
+        val pairId = prefs.getString("pairId", null) ?: return
+        val input = EditText(this).apply {
+            setText(locationTriggerButton.text.toString())
+            setSelection(text.length)
+            hint = DEFAULT_LOCATION_TRIGGER
+            isSingleLine = true
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle("Special location text")
+            .setMessage("Use this exact text in a WhatsApp, Instagram or SMS message to accelerate a pending location request.")
+            .setView(input)
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Save") { _, _ ->
+                val value = input.text.toString().trim()
+                if (value.length < 6 || value.length > 40) {
+                    locationRefreshProgress.text = "Special text must be 6–40 characters"
+                    return@setPositiveButton
+                }
+                fs.collection("pairs").document(pairId)
+                    .update(
+                        mapOf(
+                            "locationTriggerText" to value,
+                            "locationTriggerUpdatedAtMs" to System.currentTimeMillis()
+                        )
+                    )
+                    .addOnSuccessListener {
+                        locationTriggerButton.text = value
+                        locationRefreshProgress.text = "Special text updated"
+                    }
+                    .addOnFailureListener {
+                        locationRefreshProgress.text = "Could not update special text"
+                    }
+            }
+            .show()
     }
 
     private fun requestFreshLocationManually() {
