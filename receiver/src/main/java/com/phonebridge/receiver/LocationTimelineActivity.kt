@@ -2,6 +2,7 @@ package com.phonebridge.receiver
 
 import android.app.DatePickerDialog
 import android.os.Bundle
+import android.view.View
 import android.widget.Button
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
@@ -11,60 +12,92 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.mapsforge.core.graphics.Paint
+import org.mapsforge.core.graphics.Style
+import org.mapsforge.core.model.LatLong
+import org.mapsforge.core.model.MapPosition
+import org.mapsforge.map.android.graphics.AndroidGraphicFactory
+import org.mapsforge.map.android.util.AndroidUtil
+import org.mapsforge.map.android.view.MapView
+import org.mapsforge.map.datastore.MapDataStore
+import org.mapsforge.map.layer.cache.TileCache
+import org.mapsforge.map.layer.renderer.TileRendererLayer
+import org.mapsforge.map.reader.MapFile
+import org.mapsforge.map.rendertheme.InternalRenderTheme
+import org.mapsforge.map.layer.overlay.Polyline
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
 class LocationTimelineActivity : AppCompatActivity() {
-    private val db by lazy {
-        Room.databaseBuilder(this, LocalDb::class.java, "phonebridge.db").build()
-    }
-    private lateinit var timelineView: LocationTimelineView
+    private val db by lazy { Room.databaseBuilder(this, LocalDb::class.java, "phonebridge.db").build() }
+    private lateinit var mapView: MapView
+    private lateinit var mapStatus: TextView
     private lateinit var dateButton: Button
     private lateinit var summary: TextView
+    private var mapDataStore: MapDataStore? = null
+    private var tileCache: TileCache? = null
+    private var rendererLayer: TileRendererLayer? = null
+    private var routeLayer: Polyline? = null
     private val selected = Calendar.getInstance()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AndroidGraphicFactory.createInstance(application)
         setContentView(R.layout.activity_location_timeline)
-
-        timelineView = findViewById(R.id.timelineView)
+        mapView = findViewById(R.id.timelineMapView)
+        mapStatus = findViewById(R.id.timelineMapStatus)
         dateButton = findViewById(R.id.btnTimelineDate)
         summary = findViewById(R.id.timelineSummary)
+        mapView.isClickable = true
+        mapView.setBuiltInZoomControls(true)
+        mapView.mapScaleBar.isVisible = true
+        openOfflineMap()
 
         findViewById<Button>(R.id.btnTimelineBack).setOnClickListener { finish() }
-        findViewById<Button>(R.id.btnTimelinePrevious).setOnClickListener {
-            selected.add(Calendar.DAY_OF_MONTH, -1)
-            loadDay()
-        }
-        findViewById<Button>(R.id.btnTimelineNext).setOnClickListener {
-            selected.add(Calendar.DAY_OF_MONTH, 1)
-            loadDay()
-        }
+        findViewById<Button>(R.id.btnTimelinePrevious).setOnClickListener { selected.add(Calendar.DAY_OF_MONTH, -1); loadDay() }
+        findViewById<Button>(R.id.btnTimelineNext).setOnClickListener { selected.add(Calendar.DAY_OF_MONTH, 1); loadDay() }
         dateButton.setOnClickListener {
-            DatePickerDialog(
-                this,
-                { _, y, m, d ->
-                    selected.set(y, m, d)
-                    loadDay()
-                },
-                selected.get(Calendar.YEAR),
-                selected.get(Calendar.MONTH),
-                selected.get(Calendar.DAY_OF_MONTH)
-            ).show()
+            DatePickerDialog(this, { _, y, m, d -> selected.set(y, m, d); loadDay() },
+                selected.get(Calendar.YEAR), selected.get(Calendar.MONTH), selected.get(Calendar.DAY_OF_MONTH)).show()
         }
         loadDay()
     }
 
+    /**
+     * Security boundary: this renderer opens only a local Mapsforge .map file.
+     * It does not fetch tiles, geocode, route, map-match, or transmit timeline coordinates.
+     * Put a downloaded file at filesDir/offline-maps/phonebridge.map.
+     */
+    private fun openOfflineMap() {
+        val file = File(File(filesDir, "offline-maps"), "phonebridge.map")
+        if (!file.isFile) {
+            mapStatus.visibility = View.VISIBLE
+            mapStatus.text = "Offline map not installed\nExpected: PhoneBridge offline map"
+            return
+        }
+        try {
+            mapDataStore = MapFile(file)
+            tileCache = AndroidUtil.createTileCache(this, "timeline-map", mapView.model.displayModel.tileSize, 1f, mapView.model.frameBufferModel.overdrawFactor)
+            rendererLayer = TileRendererLayer(tileCache, mapDataStore, mapView.model.mapViewPosition, AndroidGraphicFactory.INSTANCE).also {
+                it.setXmlRenderTheme(InternalRenderTheme.DEFAULT)
+                mapView.layerManager.layers.add(it)
+            }
+            mapStatus.visibility = View.GONE
+        } catch (_: Exception) {
+            mapStatus.visibility = View.VISIBLE
+            mapStatus.text = "Offline map could not be opened"
+        }
+    }
+
     private fun loadDay() {
         val start = (selected.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
-            set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }.timeInMillis
         val end = (selected.clone() as Calendar).apply {
-            set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59)
-            set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
+            set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999)
         }.timeInMillis
         dateButton.text = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(start))
 
@@ -79,21 +112,45 @@ class LocationTimelineActivity : AppCompatActivity() {
                     val meta = JSONObject(row.metadataJson)
                     val lat = meta.optString("latitude").toDoubleOrNull() ?: return@mapNotNull null
                     val lon = meta.optString("longitude").toDoubleOrNull() ?: return@mapNotNull null
-                    TimelinePoint(
-                        latitude = lat,
-                        longitude = lon,
-                        timestamp = row.timestamp,
-                        accuracy = meta.optString("accuracyMeters"),
-                        trigger = meta.optString("trigger")
-                    )
+                    TimelinePoint(lat, lon, row.timestamp, meta.optString("accuracyMeters"), meta.optString("trigger"))
                 } catch (_: Exception) { null }
-            }
-            timelineView.setPoints(points)
+            }.sortedBy { it.timestamp }
+            drawLocalTimeline(points)
             summary.text = when (points.size) {
                 0 -> "No location data recorded for this day"
-                1 -> "1 recorded location · tap the point for details"
+                1 -> "1 recorded location"
                 else -> "${points.size} recorded locations · chronological line from start to end"
             }
         }
+    }
+
+    private fun drawLocalTimeline(points: List<TimelinePoint>) {
+        routeLayer?.let { mapView.layerManager.layers.remove(it) }
+        routeLayer = null
+        if (points.isEmpty()) return
+        val latLongs = points.map { LatLong(it.latitude, it.longitude) }
+        if (latLongs.size > 1) {
+            val paint: Paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+                color = AndroidGraphicFactory.INSTANCE.createColor(255, 37, 99, 235)
+                strokeWidth = 8f
+                style = Style.STROKE
+            }
+            routeLayer = Polyline(paint, AndroidGraphicFactory.INSTANCE).also {
+                it.latLongs.addAll(latLongs)
+                mapView.layerManager.layers.add(it)
+            }
+        }
+        mapView.model.mapViewPosition.mapPosition = MapPosition(latLongs.last(), 16.toByte())
+    }
+
+    override fun onDestroy() {
+        routeLayer?.let { mapView.layerManager.layers.remove(it) }
+        rendererLayer?.let { mapView.layerManager.layers.remove(it) }
+        rendererLayer?.onDestroy()
+        mapDataStore?.close()
+        tileCache?.destroy()
+        mapView.destroyAll()
+        AndroidGraphicFactory.clearResourceMemoryCache()
+        super.onDestroy()
     }
 }
