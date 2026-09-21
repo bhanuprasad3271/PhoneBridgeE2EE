@@ -22,11 +22,18 @@
     </LinearLayout>
     <TextView android:id="@+id/timelineSummary" android:layout_width="match_parent" android:layout_height="wrap_content"
         android:paddingTop="10dp" android:paddingBottom="10dp" android:textColor="#94A3B8" android:textSize="13sp"/>
-    <com.phonebridge.receiver.LocationTimelineView android:id="@+id/timelineView"
+    <FrameLayout android:id="@+id/timelineMapContainer"
         android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
-        android:background="#0F172A"/>
+        android:background="#0F172A">
+        <org.mapsforge.map.android.view.MapView android:id="@+id/timelineMapView"
+            android:layout_width="match_parent" android:layout_height="match_parent"/>
+        <TextView android:id="@+id/timelineMapStatus" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:layout_gravity="center" android:gravity="center" android:padding="18dp"
+            android:text="Offline map file not selected" android:textColor="#F8FAFC" android:textSize="15sp"
+            android:background="#CC0F172A"/>
+    </FrameLayout>
     <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
         android:paddingTop="8dp" android:gravity="center"
-        android:text="Local visualization · recorded points only · no map API"
+        android:text="Offline map · local location overlay · no map API"
         android:textColor="#64748B" android:textSize="12sp"/>
 </LinearLayout>
