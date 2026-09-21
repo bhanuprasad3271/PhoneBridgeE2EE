@@ -46,8 +46,14 @@ class LocationSyncWorker(
                 .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
                 .addOnFailureListener { if (cont.isActive) cont.resume(null) }
         }
-        val requestId = requestSnapshot?.getString("locationRequestId")
-            ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
+        val requestedTrigger = inputData.getString("locationTrigger").orEmpty()
+        val specialTextTrigger = requestedTrigger == "special_text"
+        val requestId = if (specialTextTrigger) {
+            null
+        } else {
+            requestSnapshot?.getString("locationRequestId")
+                ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
+        }
 
         if (requestId != null) {
             updateRequestStatus(pairId, requestId, "sender_received")
@@ -88,7 +94,11 @@ class LocationSyncWorker(
                 "provider" to (location.provider ?: "fused"),
                 "locationTimeMs" to timestamp.toString(),
                 "collectedAtMs" to now.toString(),
-                "trigger" to if (requestId != null) "manual_refresh" else "periodic",
+                "trigger" to when {
+                    specialTextTrigger -> "special_text"
+                    requestId != null -> "manual_refresh"
+                    else -> "periodic"
+                },
                 "requestId" to (requestId ?: "")
             )
         )
