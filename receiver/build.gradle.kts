@@ -35,5 +35,6 @@ dependencies {
     // Offline-only vector map rendering. No map API key or online tile service.
     implementation("org.mapsforge:mapsforge-map-android:0.25.0")
     implementation("org.mapsforge:mapsforge-map-reader:0.25.0")
+    implementation("org.mapsforge:mapsforge-themes:0.25.0")
     kapt("androidx.room:room-compiler:2.8.5")
 }
