@@ -65,8 +65,8 @@ class LocationTimelineActivity : AppCompatActivity() {
         dateButton = findViewById(R.id.btnTimelineDate)
         summary = findViewById(R.id.timelineSummary)
         mapView.isClickable = true
-        mapView.setBuiltInZoomControls(true)
-        mapView.mapScaleBar.isVisible = true
+        mapView.setBuiltInZoomControls(false)
+        mapView.mapScaleBar.isVisible = false
         findViewById<Button>(R.id.btnImportOfflineMap).setOnClickListener {
             importMap.launch(arrayOf("application/octet-stream", "application/*"))
         }
@@ -124,7 +124,7 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapDataStore = MapFile(file)
             tileCache = AndroidUtil.createTileCache(this, "timeline-map", mapView.model.displayModel.tileSize, 1f, mapView.model.frameBufferModel.overdrawFactor)
             rendererLayer = TileRendererLayer(tileCache, mapDataStore, mapView.model.mapViewPosition, AndroidGraphicFactory.INSTANCE).also {
-                it.setXmlRenderTheme(MapsforgeThemes.MOTORIDER)
+                it.setXmlRenderTheme(MapsforgeThemes.DEFAULT)
                 mapView.layerManager.layers.add(it)
             }
             mapStatus.visibility = View.GONE
