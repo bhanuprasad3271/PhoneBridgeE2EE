@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
@@ -17,6 +18,10 @@ import org.json.JSONObject
 import org.mapsforge.core.graphics.Paint
 import org.mapsforge.core.graphics.Style
 import org.mapsforge.core.model.LatLong
+import org.mapsforge.core.model.BoundingBox
+import org.mapsforge.core.model.Dimension
+import org.mapsforge.core.model.Point
+import org.mapsforge.core.util.LatLongUtils
 import org.mapsforge.core.model.MapPosition
 import org.mapsforge.map.android.graphics.AndroidGraphicFactory
 import org.mapsforge.map.android.util.AndroidUtil
@@ -27,6 +32,8 @@ import org.mapsforge.map.layer.renderer.TileRendererLayer
 import org.mapsforge.map.reader.MapFile
 import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
 import org.mapsforge.map.layer.overlay.Polyline
+import org.mapsforge.map.layer.overlay.FixedPixelCircle
+import org.mapsforge.map.layer.Layer
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -43,6 +50,7 @@ class LocationTimelineActivity : AppCompatActivity() {
     private var tileCache: TileCache? = null
     private var rendererLayer: TileRendererLayer? = null
     private var routeLayer: Polyline? = null
+    private val pointLayers = mutableListOf<Layer>()
     private val selected = Calendar.getInstance()
     private val importMap = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) importOfflineMap(uri)
@@ -116,7 +124,7 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapDataStore = MapFile(file)
             tileCache = AndroidUtil.createTileCache(this, "timeline-map", mapView.model.displayModel.tileSize, 1f, mapView.model.frameBufferModel.overdrawFactor)
             rendererLayer = TileRendererLayer(tileCache, mapDataStore, mapView.model.mapViewPosition, AndroidGraphicFactory.INSTANCE).also {
-                it.setXmlRenderTheme(MapsforgeThemes.DEFAULT)
+                it.setXmlRenderTheme(MapsforgeThemes.MOTORIDER)
                 mapView.layerManager.layers.add(it)
             }
             mapStatus.visibility = View.GONE
@@ -161,12 +169,16 @@ class LocationTimelineActivity : AppCompatActivity() {
     private fun drawLocalTimeline(points: List<TimelinePoint>) {
         routeLayer?.let { mapView.layerManager.layers.remove(it) }
         routeLayer = null
+        pointLayers.forEach { mapView.layerManager.layers.remove(it) }
+        pointLayers.clear()
         if (points.isEmpty()) return
+
         val latLongs = points.map { LatLong(it.latitude, it.longitude) }
+
         if (latLongs.size > 1) {
             val paint: Paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-                color = AndroidGraphicFactory.INSTANCE.createColor(255, 37, 99, 235)
-                setStrokeWidth(8f)
+                color = AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
+                setStrokeWidth(7f)
                 setStyle(Style.STROKE)
             }
             routeLayer = Polyline(paint, AndroidGraphicFactory.INSTANCE).also {
@@ -174,11 +186,68 @@ class LocationTimelineActivity : AppCompatActivity() {
                 mapView.layerManager.layers.add(it)
             }
         }
-        mapView.model.mapViewPosition.mapPosition = MapPosition(latLongs.last(), 16.toByte())
+
+        points.forEachIndexed { index, point ->
+            val isStart = points.size > 1 && index == 0
+            val isEnd = points.size > 1 && index == points.lastIndex
+            val radius = if (points.size == 1 || isStart || isEnd) 15 else 9
+            val markerColor = when {
+                points.size == 1 -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
+                isStart -> AndroidGraphicFactory.INSTANCE.createColor(255, 46, 125, 50)
+                isEnd -> AndroidGraphicFactory.INSTANCE.createColor(255, 211, 47, 47)
+                else -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
+            }
+            val fill = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+                color = markerColor
+                setStyle(Style.FILL)
+            }
+            val center = LatLong(point.latitude, point.longitude)
+            val layer = object : FixedPixelCircle(center, radius, fill, null) {
+                override fun onTap(tapLatLong: LatLong, layerXY: Point, tapXY: Point): Boolean {
+                    if (!contains(layerXY, tapXY, mapView)) return false
+                    val role = when {
+                        points.size == 1 -> "LOCATION"
+                        isStart -> "START"
+                        isEnd -> "END"
+                        else -> "POINT ${index + 1}"
+                    }
+                    val time = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(point.timestamp))
+                    val source = when (point.trigger) {
+                        "periodic" -> "Automatic"
+                        "manual_refresh", "receiver_open" -> "Manual refresh"
+                        "special_text" -> "Special text"
+                        else -> point.trigger.ifBlank { "Location update" }
+                    }
+                    val accuracy = point.accuracy.takeIf { it.isNotBlank() }?.let { " · ±$it m" } ?: ""
+                    Toast.makeText(this@LocationTimelineActivity, "$role · $time\n$source$accuracy", Toast.LENGTH_LONG).show()
+                    return true
+                }
+            }
+            pointLayers.add(layer)
+            mapView.layerManager.layers.add(layer)
+        }
+
+        if (latLongs.size == 1) {
+            mapView.model.mapViewPosition.mapPosition = MapPosition(latLongs.first(), 16.toByte())
+        } else {
+            mapView.post {
+                val width = (mapView.width - 80).coerceAtLeast(1)
+                val height = (mapView.height - 80).coerceAtLeast(1)
+                val bounds = BoundingBox(latLongs)
+                val zoom = LatLongUtils.zoomForBounds(
+                    Dimension(width, height),
+                    bounds,
+                    mapView.model.displayModel.tileSize
+                ).coerceAtMost(17.toByte())
+                mapView.model.mapViewPosition.mapPosition = MapPosition(bounds.centerPoint, zoom)
+            }
+        }
     }
 
     override fun onDestroy() {
         routeLayer?.let { mapView.layerManager.layers.remove(it) }
+        pointLayers.forEach { mapView.layerManager.layers.remove(it) }
+        pointLayers.clear()
         rendererLayer?.let { mapView.layerManager.layers.remove(it) }
         rendererLayer?.onDestroy()
         mapDataStore?.close()
