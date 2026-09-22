@@ -1,5 +1,9 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }
 android {
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
     namespace = "com.phonebridge.mappreview"
     compileSdk = 36
     defaultConfig { applicationId = "com.phonebridge.mappreview"; minSdk = 26; targetSdk = 36; versionCode = 1; versionName = "1.0" }
