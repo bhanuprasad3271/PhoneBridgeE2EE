@@ -190,7 +190,7 @@ class LocationTimelineActivity : AppCompatActivity() {
         points.forEachIndexed { index, point ->
             val isStart = points.size > 1 && index == 0
             val isEnd = points.size > 1 && index == points.lastIndex
-            val radius = if (points.size == 1 || isStart || isEnd) 15 else 9
+            val radius = if (points.size == 1 || isStart || isEnd) 15f else 9f
             val markerColor = when {
                 points.size == 1 -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
                 isStart -> AndroidGraphicFactory.INSTANCE.createColor(255, 46, 125, 50)
