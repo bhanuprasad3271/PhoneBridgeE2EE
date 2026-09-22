@@ -6,4 +6,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "PhoneBridgeE2EE"
-include(":shared", ":collector", ":receiver")
+include(":shared", ":collector", ":receiver", ":mappreview")
