@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rendertheme xmlns="http://mapsforge.org/renderTheme" version="1" map-background="#202124" map-background-outside="#202124">
+  <rule e="way" k="natural" v="water|waterway"><area fill="#253746"/></rule>
+  <rule e="way" k="landuse" v="forest|grass|meadow|recreation_ground|village_green"><area fill="#26332D"/></rule>
+  <rule e="way" k="leisure" v="park|garden|golf_course"><area fill="#28382F"/></rule>
+  <rule e="way" k="building" v="*" zoom-min="16"><area fill="#303236" stroke="#3A3D42" stroke-width="0.4"/></rule>
+  <rule e="way" k="highway" v="motorway|motorway_link"><line stroke="#D89B62" stroke-width="5.0" stroke-linecap="round"/></rule>
+  <rule e="way" k="highway" v="trunk|trunk_link|primary|primary_link"><line stroke="#B79A75" stroke-width="4.2" stroke-linecap="round"/></rule>
+  <rule e="way" k="highway" v="secondary|secondary_link" zoom-min="10"><line stroke="#7D8188" stroke-width="3.2" stroke-linecap="round"/></rule>
+  <rule e="way" k="highway" v="tertiary|tertiary_link" zoom-min="12"><line stroke="#676B72" stroke-width="2.6" stroke-linecap="round"/></rule>
+  <rule e="way" k="highway" v="residential|unclassified|living_street" zoom-min="14"><line stroke="#4E5258" stroke-width="2.0" stroke-linecap="round"/></rule>
+  <rule e="way" k="highway" v="service|track" zoom-min="16"><line stroke="#41444A" stroke-width="1.3" stroke-linecap="round"/></rule>
+  <rule e="way" k="railway" v="rail" zoom-min="12"><line stroke="#55585E" stroke-width="1.2"/></rule>
+  <rule e="node" k="place" v="city" zoom-min="5"><caption k="name" font-size="18" fill="#E8EAED" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="node" k="place" v="town" zoom-min="8"><caption k="name" font-size="16" fill="#DADCE0" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="node" k="place" v="suburb" zoom-min="11"><caption k="name" font-size="14" fill="#BDC1C6" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="node" k="place" v="neighbourhood|village" zoom-min="13"><caption k="name" font-size="12" fill="#AEB3B8" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="way" k="highway" v="motorway|trunk|primary|secondary" zoom-min="13"><caption k="name" font-size="11" fill="#DADCE0" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="way" k="highway" v="tertiary|residential|unclassified" zoom-min="15"><caption k="name" font-size="10" fill="#B8BDC3" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="node" k="amenity" v="hospital|university|college|school" zoom-min="15"><caption k="name" font-size="10" fill="#AEB3B8" stroke="#202124" stroke-width="2"/></rule>
+  <rule e="node" k="amenity" v="fuel|restaurant|cafe|bank|atm|pharmacy" zoom-min="17"><caption k="name" font-size="9" fill="#9AA0A6" stroke="#202124" stroke-width="2"/></rule>
+</rendertheme>
