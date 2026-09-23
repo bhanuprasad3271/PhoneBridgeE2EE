@@ -2,6 +2,7 @@ package com.phonebridge.receiver
 
 import android.app.DatePickerDialog
 import android.os.Bundle
+import android.content.res.Configuration
 import android.net.Uri
 import androidx.activity.result.contract.ActivityResultContracts
 import android.view.View
@@ -46,6 +47,8 @@ class LocationTimelineActivity : AppCompatActivity() {
     private lateinit var mapStatus: TextView
     private lateinit var dateButton: Button
     private lateinit var summary: TextView
+    private lateinit var themeButton: Button
+    private var manualLight: Boolean? = null
     private var mapDataStore: MapDataStore? = null
     private var tileCache: TileCache? = null
     private var rendererLayer: TileRendererLayer? = null
@@ -64,6 +67,9 @@ class LocationTimelineActivity : AppCompatActivity() {
         mapStatus = findViewById(R.id.timelineMapStatus)
         dateButton = findViewById(R.id.btnTimelineDate)
         summary = findViewById(R.id.timelineSummary)
+        themeButton = findViewById(R.id.btnTimelineTheme)
+        themeButton.setOnClickListener { manualLight = !isLightMap(); applyMapTheme() }
+        updateThemeButton()
         mapView.isClickable = true
         mapView.setBuiltInZoomControls(false)
         mapView.mapScaleBar.isVisible = false
@@ -124,8 +130,9 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapDataStore = MapFile(file)
             tileCache = AndroidUtil.createTileCache(this, "timeline-map", mapView.model.displayModel.tileSize, 1f, mapView.model.frameBufferModel.overdrawFactor)
             rendererLayer = TileRendererLayer(tileCache, mapDataStore, mapView.model.mapViewPosition, AndroidGraphicFactory.INSTANCE).also {
-                val themeFile = File(filesDir, "phonebridge-dark.xml").also { localTheme ->
-                    assets.open("phonebridge-dark.xml").use { input ->
+                val assetName = if (isLightMap()) "phonebridge-light.xml" else "phonebridge-dark.xml"
+                val themeFile = File(filesDir, assetName).also { localTheme ->
+                    assets.open(assetName).use { input ->
                         localTheme.outputStream().use { output -> input.copyTo(output) }
                     }
                 }
@@ -137,6 +144,26 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapStatus.visibility = View.VISIBLE
             mapStatus.text = "Offline map could not be opened"
         }
+    }
+
+    private fun systemLight(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES
+
+    private fun isLightMap(): Boolean = manualLight ?: systemLight()
+
+    private fun updateThemeButton() {
+        themeButton.text = if (isLightMap()) "☾" else "☀"
+        themeButton.contentDescription = if (isLightMap()) "Switch map to dark mode" else "Switch map to light mode"
+    }
+
+    private fun applyMapTheme() {
+        val layer = rendererLayer ?: return
+        val assetName = if (isLightMap()) "phonebridge-light.xml" else "phonebridge-dark.xml"
+        val themeFile = File(filesDir, assetName)
+        assets.open(assetName).use { input -> themeFile.outputStream().use { output -> input.copyTo(output) } }
+        layer.setXmlRenderTheme(ExternalRenderTheme(themeFile))
+        layer.requestRedraw()
+        updateThemeButton()
     }
 
     private fun loadDay() {
