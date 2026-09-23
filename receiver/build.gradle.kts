@@ -37,4 +37,5 @@ dependencies {
     implementation("org.mapsforge:mapsforge-map-reader:0.25.0")
     implementation("org.mapsforge:mapsforge-themes:0.25.0")
     kapt("androidx.room:room-compiler:2.8.5")
+    testImplementation("junit:junit:4.13.2")
 }
