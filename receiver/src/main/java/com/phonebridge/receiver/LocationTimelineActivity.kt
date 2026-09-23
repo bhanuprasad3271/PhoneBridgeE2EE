@@ -8,8 +8,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.view.View
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
@@ -237,14 +237,8 @@ class LocationTimelineActivity : AppCompatActivity() {
         }
         addRouteLine(route)
 
-        var stayNumber = 0
+        val tapTargets = mutableListOf<Pair<FixedPixelCircle, Int>>()
         entries.forEachIndexed { index, entry ->
-            if (entry is TimelineEntry.Stay) {
-                val layer = stayUi.markerFor(entry, ++stayNumber)
-                pointLayers.add(layer)
-                mapView.layerManager.layers.add(layer)
-                return@forEachIndexed
-            }
             val point = entry.position
             val isStart = entries.size > 1 && index == 0
             val isEnd = entries.size > 1 && index == entries.lastIndex
@@ -263,24 +257,36 @@ class LocationTimelineActivity : AppCompatActivity() {
             val layer = object : FixedPixelCircle(center, radius, fill, null) {
                 override fun onTap(tapLatLong: LatLong, layerXY: Point, tapXY: Point): Boolean {
                     if (!contains(layerXY, tapXY, mapView)) return false
-                    val role = when {
-                        entries.size == 1 -> "LOCATION"
-                        isStart -> "START"
-                        isEnd -> "END"
-                        else -> "POINT ${index + 1}"
+                    // Check all points at the tapped screen position so a later
+                    // visit cannot hide an earlier visit at the same location.
+                    val hits = tapTargets.filter { (circle, targetIndex) ->
+                        val screen = mapView.mapViewProjection.toPixels(latLongs[targetIndex])
+                        screen != null && circle.contains(screen, tapXY, mapView)
+                    }.map { it.second }.ifEmpty { listOf(index) }
+                    if (hits.size == 1) {
+                        showTimelineEntry(entries, hits.first())
+                    } else {
+                        val clock = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                        val labels = hits.map { hit ->
+                            val candidate = entries[hit]
+                            val first = clock.format(Date(candidate.firstRecordedAt))
+                            if (candidate is TimelineEntry.Stay) {
+                                val last = clock.format(Date(candidate.lastRecordedAt))
+                                "Stay · $first – $last"
+                            } else {
+                                "Location · $first"
+                            }
+                        }.toTypedArray()
+                        AlertDialog.Builder(this@LocationTimelineActivity)
+                            .setTitle("Visits at this point")
+                            .setItems(labels) { _, choice -> showTimelineEntry(entries, hits[choice]) }
+                            .setNegativeButton("Close", null)
+                            .show()
                     }
-                    val time = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(point.timestamp))
-                    val source = when (point.trigger) {
-                        "periodic" -> "Automatic"
-                        "manual_refresh", "receiver_open" -> "Manual refresh"
-                        "special_text" -> "Special text"
-                        else -> point.trigger.ifBlank { "Location update" }
-                    }
-                    val accuracy = point.accuracy.takeIf { it.isNotBlank() }?.let { " · ±$it m" } ?: ""
-                    Toast.makeText(this@LocationTimelineActivity, "$role · $time\n$source$accuracy", Toast.LENGTH_LONG).show()
                     return true
                 }
             }
+            tapTargets.add(layer to index)
             pointLayers.add(layer)
             mapView.layerManager.layers.add(layer)
         }
@@ -300,6 +306,36 @@ class LocationTimelineActivity : AppCompatActivity() {
                 mapView.model.mapViewPosition.mapPosition = MapPosition(bounds.centerPoint, zoom)
             }
         }
+    }
+
+    private fun showTimelineEntry(entries: List<TimelineEntry>, index: Int) {
+        val entry = entries[index]
+        if (entry is TimelineEntry.Stay) {
+            val number = entries.take(index + 1).count { it is TimelineEntry.Stay }
+            stayUi.showDetails(entry, number)
+            return
+        }
+        val point = entry.position
+        val role = when {
+            entries.size == 1 -> "Location"
+            index == 0 -> "Start"
+            index == entries.lastIndex -> "End"
+            else -> "Point ${index + 1}"
+        }
+        val time = SimpleDateFormat("hh:mm a", Locale.getDefault()).format(Date(point.timestamp))
+        val source = when (point.trigger) {
+            "periodic" -> "Automatic"
+            "manual_refresh", "receiver_open" -> "Manual refresh"
+            "special_text" -> "Special text"
+            else -> point.trigger.ifBlank { "Location update" }
+        }
+        val accuracy = point.accuracy.takeIf { it.isNotBlank() }?.let { "\nAccuracy: ±$it m" } ?: ""
+        val coordinates = String.format(Locale.US, "%.6f, %.6f", point.latitude, point.longitude)
+        AlertDialog.Builder(this)
+            .setTitle(role)
+            .setMessage("Recorded: $time\n$source$accuracy\n$coordinates")
+            .setPositiveButton("Close", null)
+            .show()
     }
 
     private fun addRouteLine(points: List<LatLong>) {
