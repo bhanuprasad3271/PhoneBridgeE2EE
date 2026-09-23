@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:background="#111318" android:fitsSystemWindows="true">
-<TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="PhoneBridge Map Preview" android:textStyle="bold" android:textSize="20sp" android:textColor="#E8EAED" android:padding="16dp"/>
-<Button android:id="@+id/pickMap" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginHorizontal="16dp" android:text="Choose .map file" android:textAllCaps="false"/>
-<TextView android:id="@+id/status" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Choose the same Mapsforge .map file used in PhoneBridge" android:textColor="#9AA0A6" android:padding="12dp"/>
-<org.mapsforge.map.android.view.MapView android:id="@+id/mapView" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"/>
-</LinearLayout>
