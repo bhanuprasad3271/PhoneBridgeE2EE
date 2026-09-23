@@ -259,8 +259,8 @@ class LocationTimelineActivity : AppCompatActivity() {
                     if (!contains(layerXY, tapXY, mapView)) return false
                     // Check all points at the tapped screen position so a later
                     // visit cannot hide an earlier visit at the same location.
-                    val hits = tapTargets.filter { (circle, _) ->
-                        val screen = mapView.mapViewProjection.toPixels(circle.latLong)
+                    val hits = tapTargets.filter { (circle, targetIndex) ->
+                        val screen = mapView.mapViewProjection.toPixels(latLongs[targetIndex])
                         screen != null && circle.contains(screen, tapXY, mapView)
                     }.map { it.second }.ifEmpty { listOf(index) }
                     if (hits.size == 1) {
