@@ -39,16 +39,19 @@
   <rule e="way" k="highway" v="track|path|footway|cycleway" zoom-min="18"><line stroke="#294054" stroke-width="0.8" stroke-linecap="round"/></rule>
   <rule e="way" k="railway" v="rail" zoom-min="13"><line stroke="#3D5061" stroke-width="0.9"/></rule>
 
-  <!-- Place hierarchy: few labels when wide, progressively richer labels when close. -->
+  <!-- Label hierarchy: city/locality first, road names only as the view gets closer. -->
   <rule e="node" k="place" v="city" zoom-min="5"><caption k="name" font-size="18" fill="#E7EEF5" stroke="#172536" stroke-width="2.5"/></rule>
-  <rule e="node" k="place" v="town" zoom-min="8"><caption k="name" font-size="15" fill="#D7E0E8" stroke="#172536" stroke-width="2.2"/></rule>
-  <rule e="node" k="place" v="suburb" zoom-min="10"><caption k="name" font-size="13" fill="#BECAD5" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="node" k="place" v="village" zoom-min="11"><caption k="name" font-size="12" fill="#B4C1CC" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="node" k="place" v="neighbourhood|quarter" zoom-min="14"><caption k="name" font-size="11" fill="#AAB7C3" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="node" k="place" v="town" zoom-min="9"><caption k="name" font-size="15" fill="#D7E0E8" stroke="#172536" stroke-width="2.2"/></rule>
+  <rule e="node" k="place" v="suburb" zoom-min="12"><caption k="name" font-size="13" fill="#BECAD5" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="node" k="place" v="village" zoom-min="13"><caption k="name" font-size="12" fill="#B4C1CC" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="node" k="place" v="neighbourhood|quarter" zoom-min="15"><caption k="name" font-size="11" fill="#AAB7C3" stroke="#172536" stroke-width="2"/></rule>
 
-  <rule e="way" k="highway" v="motorway|trunk|primary" zoom-min="12"><caption k="name" font-size="11" fill="#D6DEE6" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="way" k="highway" v="secondary|tertiary" zoom-min="15"><caption k="name" font-size="10" fill="#C2CDD7" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="way" k="highway" v="residential|unclassified" zoom-min="17"><caption k="name" font-size="9" fill="#AEBBC7" stroke="#172536" stroke-width="2"/></rule>
+  <!-- At city scale only motorway/trunk names. Primary names arrive closer; ordinary streets much later. -->
+  <rule e="way" k="highway" v="motorway|trunk" zoom-min="12"><caption k="name" font-size="10" fill="#D6DEE6" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="way" k="highway" v="primary" zoom-min="15"><caption k="name" font-size="10" fill="#CBD5DE" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="way" k="highway" v="secondary" zoom-min="16"><caption k="name" font-size="9" fill="#BECAD4" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="way" k="highway" v="tertiary" zoom-min="17"><caption k="name" font-size="9" fill="#B3C0CB" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="way" k="highway" v="residential|unclassified|living_street" zoom-min="18"><caption k="name" font-size="9" fill="#A6B4C0" stroke="#172536" stroke-width="2"/></rule>
 
   <!-- Useful landmarks only; routine POIs are deliberately delayed until street-level zoom. -->
   <rule e="node" k="tourism" v="attraction|museum" zoom-min="14"><caption k="name" font-size="10" fill="#BFCBD5" stroke="#172536" stroke-width="2"/></rule>
