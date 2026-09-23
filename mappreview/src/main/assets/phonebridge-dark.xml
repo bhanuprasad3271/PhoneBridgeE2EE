@@ -48,10 +48,9 @@
 
   <!-- At city scale only motorway/trunk names. Primary names arrive closer; ordinary streets much later. -->
 
-  <!-- Useful landmarks only; routine POIs are deliberately delayed until street-level zoom. -->
-  <rule e="node" k="tourism" v="attraction|museum" zoom-min="14"><caption k="name" font-size="10" fill="#BFCBD5" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="node" k="amenity" v="hospital|university|college" zoom-min="14"><caption k="name" font-size="10" fill="#BFCBD5" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="node" k="amenity" v="school|police|place_of_worship" zoom-min="16"><caption k="name" font-size="9" fill="#AEBBC7" stroke="#172536" stroke-width="2"/></rule>
-  <rule e="node" k="amenity" v="restaurant|cafe|fast_food|pharmacy|bank|atm|fuel" zoom-min="18"><caption k="name" font-size="9" fill="#A5B2BE" stroke="#172536" stroke-width="2"/></rule>
+  <!-- POIs: hospitals are ordinary POIs. Keep all routine POIs at street-level only.
+       Mapsforge collision handling suppresses overlapping captions so dense groups do not all render. -->
+  <rule e="node" k="tourism" v="attraction|museum" zoom-min="17"><caption k="name" font-size="9" fill="#AEBBC7" stroke="#172536" stroke-width="2"/></rule>
+  <rule e="node" k="amenity" v="hospital|university|college|school|police|place_of_worship|restaurant|cafe|fast_food|pharmacy|bank|atm|fuel" zoom-min="18"><caption k="name" font-size="9" fill="#A5B2BE" stroke="#172536" stroke-width="2"/></rule>
   <rule e="node" k="shop" v="*" zoom-min="18"><caption k="name" font-size="9" fill="#9EACB8" stroke="#172536" stroke-width="2"/></rule>
 </rendertheme>
