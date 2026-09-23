@@ -13,6 +13,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -48,11 +49,15 @@ class LocationTimelineActivity : AppCompatActivity() {
     private lateinit var dateButton: Button
     private lateinit var summary: TextView
     private lateinit var themeButton: Button
+    private lateinit var staysButton: Button
+    private lateinit var stayUi: TimelineStayUi
+    private var currentStays: List<TimelineEntry.Stay> = emptyList()
+    private var dayLoadJob: Job? = null
     private var manualLight: Boolean? = null
     private var mapDataStore: MapDataStore? = null
     private var tileCache: TileCache? = null
     private var rendererLayer: TileRendererLayer? = null
-    private var routeLayer: Polyline? = null
+    private val routeLayers = mutableListOf<Polyline>()
     private val pointLayers = mutableListOf<Layer>()
     private val selected = Calendar.getInstance()
     private val importMap = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -68,6 +73,9 @@ class LocationTimelineActivity : AppCompatActivity() {
         dateButton = findViewById(R.id.btnTimelineDate)
         summary = findViewById(R.id.timelineSummary)
         themeButton = findViewById(R.id.btnTimelineTheme)
+        staysButton = findViewById(R.id.btnTimelineStays)
+        stayUi = TimelineStayUi(this, mapView)
+        staysButton.setOnClickListener { stayUi.showList(currentStays) }
         themeButton.setOnClickListener { manualLight = !isLightMap(); applyMapTheme() }
         updateThemeButton()
         mapView.isClickable = true
@@ -175,7 +183,8 @@ class LocationTimelineActivity : AppCompatActivity() {
         }.timeInMillis
         dateButton.text = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(start))
 
-        lifecycleScope.launch {
+        dayLoadJob?.cancel()
+        dayLoadJob = lifecycleScope.launch {
             val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
             val rows = withContext(Dispatchers.IO) {
                 db.dao().deleteLocationsOlderThan(cutoff)
@@ -189,42 +198,59 @@ class LocationTimelineActivity : AppCompatActivity() {
                     TimelinePoint(lat, lon, row.timestamp, meta.optString("accuracyMeters"), meta.optString("trigger"))
                 } catch (_: Exception) { null }
             }.sortedBy { it.timestamp }
-            drawLocalTimeline(points)
+            val entries = withContext(Dispatchers.Default) { TimelineStayDetector.group(points) }
+            currentStays = entries.filterIsInstance<TimelineEntry.Stay>()
+            staysButton.text = "Stays (${currentStays.size})"
+            staysButton.contentDescription = "View ${currentStays.size} recorded stays"
+            staysButton.visibility = if (currentStays.isEmpty()) View.GONE else View.VISIBLE
+            drawLocalTimeline(entries)
             summary.text = when (points.size) {
                 0 -> "No location data recorded for this day"
                 1 -> "1 recorded location"
-                else -> "${points.size} recorded locations · chronological line from start to end"
+                else -> "${points.size} recorded locations"
+            } + when (currentStays.size) {
+                0 -> ""
+                1 -> " · 1 stay"
+                else -> " · ${currentStays.size} stays"
             }
         }
     }
 
-    private fun drawLocalTimeline(points: List<TimelinePoint>) {
-        routeLayer?.let { mapView.layerManager.layers.remove(it) }
-        routeLayer = null
-        pointLayers.forEach { mapView.layerManager.layers.remove(it) }
+    private fun drawLocalTimeline(entries: List<TimelineEntry>) {
+        routeLayers.forEach { mapView.layerManager.layers.remove(it) }
+        routeLayers.clear()
+        pointLayers.forEach { mapView.layerManager.layers.remove(it); it.onDestroy() }
         pointLayers.clear()
-        if (points.isEmpty()) return
+        if (entries.isEmpty()) return
 
-        val latLongs = points.map { LatLong(it.latitude, it.longitude) }
+        val latLongs = entries.map { LatLong(it.position.latitude, it.position.longitude) }
 
-        if (latLongs.size > 1) {
-            val paint: Paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
-                color = AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
-                setStrokeWidth(7f)
-                setStyle(Style.STROKE)
+        // Connect display entries in time order, without drawing the jitter inside a
+        // stay or implying a route across long periods with no location readings.
+        val route = mutableListOf<LatLong>()
+        entries.forEachIndexed { index, entry ->
+            if (index > 0 && entry.firstRecordedAt - entries[index - 1].lastRecordedAt > TimelineStayDetector.MAX_GAP_MS) {
+                addRouteLine(route)
+                route.clear()
             }
-            routeLayer = Polyline(paint, AndroidGraphicFactory.INSTANCE).also {
-                it.latLongs.addAll(latLongs)
-                mapView.layerManager.layers.add(it)
-            }
+            route.add(latLongs[index])
         }
+        addRouteLine(route)
 
-        points.forEachIndexed { index, point ->
-            val isStart = points.size > 1 && index == 0
-            val isEnd = points.size > 1 && index == points.lastIndex
-            val radius = if (points.size == 1 || isStart || isEnd) 15f else 9f
+        var stayNumber = 0
+        entries.forEachIndexed { index, entry ->
+            if (entry is TimelineEntry.Stay) {
+                val layer = stayUi.markerFor(entry, ++stayNumber)
+                pointLayers.add(layer)
+                mapView.layerManager.layers.add(layer)
+                return@forEachIndexed
+            }
+            val point = entry.position
+            val isStart = entries.size > 1 && index == 0
+            val isEnd = entries.size > 1 && index == entries.lastIndex
+            val radius = if (entries.size == 1 || isStart || isEnd) 15f else 9f
             val markerColor = when {
-                points.size == 1 -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
+                entries.size == 1 -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
                 isStart -> AndroidGraphicFactory.INSTANCE.createColor(255, 46, 125, 50)
                 isEnd -> AndroidGraphicFactory.INSTANCE.createColor(255, 211, 47, 47)
                 else -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
@@ -238,7 +264,7 @@ class LocationTimelineActivity : AppCompatActivity() {
                 override fun onTap(tapLatLong: LatLong, layerXY: Point, tapXY: Point): Boolean {
                     if (!contains(layerXY, tapXY, mapView)) return false
                     val role = when {
-                        points.size == 1 -> "LOCATION"
+                        entries.size == 1 -> "LOCATION"
                         isStart -> "START"
                         isEnd -> "END"
                         else -> "POINT ${index + 1}"
@@ -259,8 +285,8 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapView.layerManager.layers.add(layer)
         }
 
-        if (latLongs.size == 1) {
-            mapView.model.mapViewPosition.mapPosition = MapPosition(latLongs.first(), 16.toByte())
+        if (latLongs.all { it == latLongs.first() }) {
+            mapView.model.mapViewPosition.mapPosition = MapPosition(latLongs.first(), 17.toByte())
         } else {
             mapView.post {
                 val width = (mapView.width - 80).coerceAtLeast(1)
@@ -276,9 +302,25 @@ class LocationTimelineActivity : AppCompatActivity() {
         }
     }
 
+    private fun addRouteLine(points: List<LatLong>) {
+        if (points.size < 2) return
+        val paint: Paint = AndroidGraphicFactory.INSTANCE.createPaint().apply {
+            color = AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
+            setStrokeWidth(7f)
+            setStyle(Style.STROKE)
+        }
+        val layer = Polyline(paint, AndroidGraphicFactory.INSTANCE).also {
+            it.latLongs.addAll(points)
+            mapView.layerManager.layers.add(it)
+        }
+        routeLayers.add(layer)
+    }
+
     override fun onDestroy() {
-        routeLayer?.let { mapView.layerManager.layers.remove(it) }
-        pointLayers.forEach { mapView.layerManager.layers.remove(it) }
+        dayLoadJob?.cancel()
+        routeLayers.forEach { mapView.layerManager.layers.remove(it) }
+        routeLayers.clear()
+        pointLayers.forEach { mapView.layerManager.layers.remove(it); it.onDestroy() }
         pointLayers.clear()
         rendererLayer?.let { mapView.layerManager.layers.remove(it) }
         rendererLayer?.onDestroy()
