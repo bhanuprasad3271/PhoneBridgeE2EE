@@ -34,7 +34,7 @@ jobs:
           printf '%s' "$FIREBASE_GOOGLE_SERVICES" > receiver/google-services.json
 
       - name: Build debug APKs
-        run: gradle :receiver:assembleDebug :collector:assembleDebug :mappreview:assembleDebug --stacktrace
+        run: gradle :receiver:assembleDebug :collector:assembleDebug --stacktrace
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
@@ -43,4 +43,3 @@ jobs:
           path: |
             receiver/build/outputs/apk/debug/receiver-debug.apk
             collector/build/outputs/apk/debug/collector-debug.apk
-            mappreview/build/outputs/apk/debug/mappreview-debug.apk
