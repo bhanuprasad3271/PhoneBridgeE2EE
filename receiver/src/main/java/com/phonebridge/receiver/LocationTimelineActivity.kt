@@ -30,7 +30,7 @@ import org.mapsforge.map.datastore.MapDataStore
 import org.mapsforge.map.layer.cache.TileCache
 import org.mapsforge.map.layer.renderer.TileRendererLayer
 import org.mapsforge.map.reader.MapFile
-import org.mapsforge.map.rendertheme.internal.MapsforgeThemes
+import org.mapsforge.map.rendertheme.ExternalRenderTheme
 import org.mapsforge.map.layer.overlay.Polyline
 import org.mapsforge.map.layer.overlay.FixedPixelCircle
 import org.mapsforge.map.layer.Layer
@@ -124,7 +124,12 @@ class LocationTimelineActivity : AppCompatActivity() {
             mapDataStore = MapFile(file)
             tileCache = AndroidUtil.createTileCache(this, "timeline-map", mapView.model.displayModel.tileSize, 1f, mapView.model.frameBufferModel.overdrawFactor)
             rendererLayer = TileRendererLayer(tileCache, mapDataStore, mapView.model.mapViewPosition, AndroidGraphicFactory.INSTANCE).also {
-                it.setXmlRenderTheme(MapsforgeThemes.DEFAULT)
+                val themeFile = File(filesDir, "phonebridge-dark.xml").also { localTheme ->
+                    assets.open("phonebridge-dark.xml").use { input ->
+                        localTheme.outputStream().use { output -> input.copyTo(output) }
+                    }
+                }
+                it.setXmlRenderTheme(ExternalRenderTheme(themeFile))
                 mapView.layerManager.layers.add(it)
             }
             mapStatus.visibility = View.GONE
