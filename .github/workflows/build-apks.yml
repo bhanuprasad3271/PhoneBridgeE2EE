@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   build:
@@ -32,6 +34,9 @@ jobs:
           mkdir -p collector receiver
           printf '%s' "$FIREBASE_GOOGLE_SERVICES" > collector/google-services.json
           printf '%s' "$FIREBASE_GOOGLE_SERVICES" > receiver/google-services.json
+
+      - name: Test Receiver timeline logic
+        run: gradle :receiver:testDebugUnitTest --stacktrace
 
       - name: Build debug APKs
         run: gradle :receiver:assembleDebug :collector:assembleDebug --stacktrace

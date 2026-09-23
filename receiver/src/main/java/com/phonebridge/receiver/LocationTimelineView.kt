@@ -14,14 +14,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-data class TimelinePoint(
-    val latitude: Double,
-    val longitude: Double,
-    val timestamp: Long,
-    val accuracy: String,
-    val trigger: String
-)
-
 class LocationTimelineView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null
