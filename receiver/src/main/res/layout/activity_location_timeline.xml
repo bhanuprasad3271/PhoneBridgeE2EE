@@ -31,6 +31,11 @@
     <Button android:id="@+id/btnTimelineStays" android:layout_width="wrap_content" android:layout_height="48dp"
         android:layout_marginStart="8dp" android:text="Stays" android:textAllCaps="false"
         android:textColor="#422006" android:backgroundTint="#FBBF24" android:visibility="gone"/>
+    <androidx.appcompat.widget.AppCompatImageButton android:id="@+id/btnTimelineText"
+        android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="6dp"
+        android:padding="12dp" android:src="@drawable/ic_timeline_list"
+        android:backgroundTint="#334155" android:contentDescription="Show timeline as text"/>
+
     </LinearLayout>
     <FrameLayout android:id="@+id/timelineMapContainer"
         android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1"
