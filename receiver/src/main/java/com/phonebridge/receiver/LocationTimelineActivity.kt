@@ -50,6 +50,7 @@ class LocationTimelineActivity : AppCompatActivity() {
     private lateinit var summary: TextView
     private lateinit var themeButton: Button
     private lateinit var staysButton: Button
+    private val addresses by lazy { OfflineTimelineAddress(File(filesDir, "offline-maps/phonebridge.map")) }
     private lateinit var stayUi: TimelineStayUi
     private var currentStays: List<TimelineEntry.Stay> = emptyList()
     private var dayLoadJob: Job? = null
@@ -74,7 +75,7 @@ class LocationTimelineActivity : AppCompatActivity() {
         summary = findViewById(R.id.timelineSummary)
         themeButton = findViewById(R.id.btnTimelineTheme)
         staysButton = findViewById(R.id.btnTimelineStays)
-        stayUi = TimelineStayUi(this, mapView)
+        stayUi = TimelineStayUi(this, mapView, addresses)
         staysButton.setOnClickListener { stayUi.showList(currentStays) }
         themeButton.setOnClickListener { manualLight = !isLightMap(); applyMapTheme() }
         updateThemeButton()
@@ -98,7 +99,7 @@ class LocationTimelineActivity : AppCompatActivity() {
 
     /**
      * Security boundary: this renderer opens only a local Mapsforge .map file.
-     * It does not fetch tiles, geocode, route, map-match, or transmit timeline coordinates.
+     * It does not fetch tiles, use online geocoding, route, map-match, or transmit timeline coordinates.
      * Put a downloaded file at filesDir/offline-maps/phonebridge.map.
      */
     private fun importOfflineMap(uri: Uri) {
@@ -225,17 +226,8 @@ class LocationTimelineActivity : AppCompatActivity() {
 
         val latLongs = entries.map { LatLong(it.position.latitude, it.position.longitude) }
 
-        // Connect display entries in time order, without drawing the jitter inside a
-        // stay or implying a route across long periods with no location readings.
-        val route = mutableListOf<LatLong>()
-        entries.forEachIndexed { index, entry ->
-            if (index > 0 && entry.firstRecordedAt - entries[index - 1].lastRecordedAt > TimelineStayDetector.MAX_GAP_MS) {
-                addRouteLine(route)
-                route.clear()
-            }
-            route.add(latLongs[index])
-        }
-        addRouteLine(route)
+        // Every displayed entry is one dot, connected in recorded-time order.
+        addRouteLine(latLongs)
 
         val tapTargets = mutableListOf<Pair<FixedPixelCircle, Int>>()
         entries.forEachIndexed { index, entry ->
@@ -247,6 +239,7 @@ class LocationTimelineActivity : AppCompatActivity() {
                 entries.size == 1 -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
                 isStart -> AndroidGraphicFactory.INSTANCE.createColor(255, 46, 125, 50)
                 isEnd -> AndroidGraphicFactory.INSTANCE.createColor(255, 211, 47, 47)
+                entry is TimelineEntry.Stay -> AndroidGraphicFactory.INSTANCE.createColor(255, 245, 158, 11)
                 else -> AndroidGraphicFactory.INSTANCE.createColor(255, 33, 150, 243)
             }
             val fill = AndroidGraphicFactory.INSTANCE.createPaint().apply {
@@ -330,12 +323,16 @@ class LocationTimelineActivity : AppCompatActivity() {
             else -> point.trigger.ifBlank { "Location update" }
         }
         val accuracy = point.accuracy.takeIf { it.isNotBlank() }?.let { "\nAccuracy: ±$it m" } ?: ""
-        val coordinates = String.format(Locale.US, "%.6f, %.6f", point.latitude, point.longitude)
-        AlertDialog.Builder(this)
+        val details = "Recorded: $time\n$source$accuracy"
+        val dialog = AlertDialog.Builder(this)
             .setTitle(role)
-            .setMessage("Recorded: $time\n$source$accuracy\n$coordinates")
+            .setMessage("$details\nAddress: Looking up offline map…")
             .setPositiveButton("Close", null)
             .show()
+        lifecycleScope.launch {
+            val address = addresses.address(point)
+            if (dialog.isShowing) dialog.setMessage("$details\n$address")
+        }
     }
 
     private fun addRouteLine(points: List<LatLong>) {
@@ -345,7 +342,7 @@ class LocationTimelineActivity : AppCompatActivity() {
             setStrokeWidth(7f)
             setStyle(Style.STROKE)
         }
-        val layer = Polyline(paint, AndroidGraphicFactory.INSTANCE).also {
+        val layer = DirectionalTimelineLine(paint).also {
             it.latLongs.addAll(points)
             mapView.layerManager.layers.add(it)
         }
