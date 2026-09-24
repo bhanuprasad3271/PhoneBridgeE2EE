@@ -51,6 +51,10 @@ class LocationTimelineActivity : AppCompatActivity() {
     private lateinit var themeButton: Button
     private lateinit var staysButton: Button
     private val addresses by lazy { OfflineTimelineAddress(File(filesDir, "offline-maps/phonebridge.map")) }
+    private lateinit var placeUi: TimelinePlaceUi
+    private lateinit var textUi: TimelineTextUi
+    private lateinit var textButton: View
+    private var currentEntries: List<TimelineEntry> = emptyList()
     private lateinit var stayUi: TimelineStayUi
     private var currentStays: List<TimelineEntry.Stay> = emptyList()
     private var dayLoadJob: Job? = null
@@ -75,7 +79,16 @@ class LocationTimelineActivity : AppCompatActivity() {
         summary = findViewById(R.id.timelineSummary)
         themeButton = findViewById(R.id.btnTimelineTheme)
         staysButton = findViewById(R.id.btnTimelineStays)
-        stayUi = TimelineStayUi(this, mapView, addresses)
+        placeUi = TimelinePlaceUi(this, SavedPlaceStore(this), addresses)
+        textUi = TimelineTextUi(this, placeUi)
+        stayUi = TimelineStayUi(this, mapView, placeUi, textUi)
+        textButton = findViewById(R.id.btnTimelineText)
+        textButton.setOnClickListener {
+            val entries = currentEntries.toList()
+            textUi.show(entries, "Timeline · ${dateButton.text}") { index ->
+                showTimelineEntry(entries, index)
+            }
+        }
         staysButton.setOnClickListener { stayUi.showList(currentStays) }
         themeButton.setOnClickListener { manualLight = !isLightMap(); applyMapTheme() }
         updateThemeButton()
@@ -185,6 +198,12 @@ class LocationTimelineActivity : AppCompatActivity() {
         dateButton.text = SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date(start))
 
         dayLoadJob?.cancel()
+        textButton.isEnabled = false
+        staysButton.isEnabled = false
+        currentEntries = emptyList()
+        currentStays = emptyList()
+        drawLocalTimeline(emptyList())
+        summary.text = "Loading locations…"
         dayLoadJob = lifecycleScope.launch {
             val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
             val rows = withContext(Dispatchers.IO) {
@@ -200,6 +219,9 @@ class LocationTimelineActivity : AppCompatActivity() {
                 } catch (_: Exception) { null }
             }.sortedBy { it.timestamp }
             val entries = withContext(Dispatchers.Default) { TimelineStayDetector.group(points) }
+            currentEntries = entries
+            textButton.isEnabled = true
+            staysButton.isEnabled = true
             currentStays = entries.filterIsInstance<TimelineEntry.Stay>()
             staysButton.text = "Stays (${currentStays.size})"
             staysButton.contentDescription = "View ${currentStays.size} recorded stays"
@@ -265,9 +287,9 @@ class LocationTimelineActivity : AppCompatActivity() {
                             val first = clock.format(Date(candidate.firstRecordedAt))
                             if (candidate is TimelineEntry.Stay) {
                                 val last = clock.format(Date(candidate.lastRecordedAt))
-                                "Stay · $first – $last"
+                                "${placeUi.store.match(candidate.position)?.name ?: "Stay"} · $first – $last"
                             } else {
-                                "Location · $first"
+                                "${placeUi.store.match(candidate.position)?.name ?: "Location"} · $first"
                             }
                         }.toTypedArray()
                         AlertDialog.Builder(this@LocationTimelineActivity)
@@ -326,13 +348,12 @@ class LocationTimelineActivity : AppCompatActivity() {
         val details = "Recorded: $time\n$source$accuracy"
         val dialog = AlertDialog.Builder(this)
             .setTitle(role)
-            .setMessage("$details\nAddress: Looking up offline map…")
+            .setMessage("$details\n${placeUi.immediateName(point)}")
+            .setNegativeButton("Name this place", null)
             .setPositiveButton("Close", null)
             .show()
-        lifecycleScope.launch {
-            val address = addresses.address(point)
-            if (dialog.isShowing) dialog.setMessage("$details\n$address")
-        }
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { placeUi.showActions(point) }
+        placeUi.bindName(dialog, point) { name -> dialog.setMessage("$details\n$name") }
     }
 
     private fun addRouteLine(points: List<LatLong>) {

@@ -12,24 +12,16 @@ import java.util.Date
 import java.util.Locale
 
 /** Local display of inferred visits. Offline address lookup; no changes to stored readings. */
-class TimelineStayUi(private val activity: AppCompatActivity, private val mapView: MapView, private val addresses: OfflineTimelineAddress) {
+class TimelineStayUi(private val activity: AppCompatActivity, private val mapView: MapView, private val places: TimelinePlaceUi, private val textUi: TimelineTextUi) {
     fun showList(stays: List<TimelineEntry.Stay>) {
         if (stays.isEmpty()) return
-        val labels = stays.mapIndexed { index, stay ->
-            "${index + 1}. ${time(stay.firstRecordedAt)} – ${time(stay.lastRecordedAt)}\n" +
-                "${duration(stay.recordedDurationMs)} · ${stay.samples.size} readings"
-        }.toTypedArray()
-        AlertDialog.Builder(activity)
-            .setTitle("Stayed here")
-            .setItems(labels) { _, index ->
-                val stay = stays[index]
-                mapView.model.mapViewPosition.mapPosition = MapPosition(
-                    LatLong(stay.position.latitude, stay.position.longitude), 17.toByte()
-                )
-                showDetails(stay, index + 1)
-            }
-            .setNegativeButton("Close", null)
-            .show()
+        textUi.show(stays, "Stays", staysOnly = true) { index ->
+            val stay = stays[index]
+            mapView.model.mapViewPosition.mapPosition = MapPosition(
+                LatLong(stay.position.latitude, stay.position.longitude), 17.toByte()
+            )
+            showDetails(stay, index + 1)
+        }
     }
 
     fun showDetails(stay: TimelineEntry.Stay, number: Int) {
@@ -42,12 +34,13 @@ class TimelineStayUi(private val activity: AppCompatActivity, private val mapVie
         val dialog = AlertDialog.Builder(activity)
             .setTitle("Stayed here · $number")
             .setMessage(message.replace("ADDRESS_PLACEHOLDER", "Address: Looking up offline map…"))
+            .setNegativeButton("Name this place", null)
             .setNeutralButton("View readings") { _, _ -> showReadings(stay, number) }
             .setPositiveButton("Close", null)
             .show()
-        activity.lifecycleScope.launch {
-            val address = addresses.address(stay.position)
-            if (dialog.isShowing) dialog.setMessage(message.replace("ADDRESS_PLACEHOLDER", address))
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { places.showActions(stay.position) }
+        places.bindName(dialog, stay.position) { name ->
+            dialog.setMessage(message.replace("ADDRESS_PLACEHOLDER", name))
         }
     }
 
@@ -61,7 +54,7 @@ class TimelineStayUi(private val activity: AppCompatActivity, private val mapVie
             val labels = mutableListOf<String>()
             for (point in stay.samples) {
                 if (!loading.isShowing) return@launch
-                val address = addresses.address(point)
+                val address = places.displayName(point)
                 val source = when (point.trigger) {
                     "periodic" -> "Automatic"
                     "manual_refresh", "receiver_open" -> "Manual refresh"
