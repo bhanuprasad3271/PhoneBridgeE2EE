@@ -15,7 +15,7 @@ import java.util.Locale
 class TimelineStayUi(private val activity: AppCompatActivity, private val mapView: MapView, private val places: TimelinePlaceUi, private val textUi: TimelineTextUi) {
     fun showList(stays: List<TimelineEntry.Stay>) {
         if (stays.isEmpty()) return
-        textUi.show(stays, "Stays", staysOnly = true) { index ->
+        textUi.show(stays, "Stays") { index ->
             val stay = stays[index]
             mapView.model.mapViewPosition.mapPosition = MapPosition(
                 LatLong(stay.position.latitude, stay.position.longitude), 17.toByte()
