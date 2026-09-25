@@ -56,7 +56,10 @@ def verify(apksigner, apk):
                             capture_output=True, text=True)
     digests = re.findall(r"Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)", result.stdout)
     if result.returncode or [d.lower() for d in digests] != [expected]:
-        raise ValueError("APK signature verification failed or APK uses a different certificate")
+        # apksigner only reports public APK/certificate metadata, never the private key.
+        print(result.stdout, file=sys.stderr)
+        print(result.stderr, file=sys.stderr)
+        raise ValueError(f"APK signature verification failed (exit {result.returncode}); parsed certificates: {digests}")
     print(f"Verified {Path(apk).name}: certificate SHA-256 {expected}")
 
 
