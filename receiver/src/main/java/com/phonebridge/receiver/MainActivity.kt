@@ -32,6 +32,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.phonebridge.shared.CryptoBox
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -56,6 +57,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var adapter: RecordAdapter
     private lateinit var locationHistoryAdapter: RecordAdapter
+    private val locationDisplayNames by lazy { LocationDisplayNames(this) }
+    private var recentAddressJob: Job? = null
     private lateinit var status: TextView
     private lateinit var dashboardStatus: TextView
     private lateinit var pairCodeText: TextView
@@ -138,7 +141,7 @@ class MainActivity : AppCompatActivity() {
         openMapsButton = findViewById(R.id.btnOpenMaps)
         locationHistoryList = findViewById(R.id.locationHistoryList)
 
-        adapter = RecordAdapter { record ->
+        adapter = RecordAdapter(bindLocationName = locationDisplayNames::bind) { record ->
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) { db.dao().deleteById(record.id) }
                 refreshLocal()
@@ -149,7 +152,7 @@ class MainActivity : AppCompatActivity() {
             adapter = this@MainActivity.adapter
         }
 
-        locationHistoryAdapter = RecordAdapter()
+        locationHistoryAdapter = RecordAdapter(bindLocationName = locationDisplayNames::bind)
         locationHistoryList.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = locationHistoryAdapter
@@ -197,6 +200,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        locationDisplayNames.reloadSavedNames()
         if (!updateReceiverRegistered) {
             ContextCompat.registerReceiver(
                 this,
@@ -225,6 +229,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        recentAddressJob?.cancel()
         queueRegistration?.remove()
         pairRegistration?.remove()
         super.onDestroy()
@@ -790,6 +795,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshLocationView() {
+        recentAddressJob?.cancel()
+        recentAddressJob = null
         val record = latestLocation
         if (record == null) {
             locationStatus.text = "Waiting for Sender location"
@@ -817,11 +824,7 @@ class MainActivity : AppCompatActivity() {
             else -> "Old location"
         }
 
-        locationCoordinates.text = if (latitude.isNotBlank() && longitude.isNotBlank()) {
-            "$latitude, $longitude"
-        } else {
-            "Location data unavailable"
-        }
+        recentAddressJob = locationDisplayNames.bind(record, locationCoordinates)
 
         locationUpdated.text = "Updated: " +
             SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
