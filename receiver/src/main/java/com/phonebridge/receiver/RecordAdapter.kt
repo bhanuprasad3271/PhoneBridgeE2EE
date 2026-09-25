@@ -7,10 +7,12 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import org.json.JSONObject
+import kotlinx.coroutines.Job
 import java.text.DateFormat
 import java.util.Date
 
 class RecordAdapter(
+    private val bindLocationName: ((RecordEntity, TextView) -> Job?)? = null,
     private val onDelete: (RecordEntity) -> Unit = {}
 ) : RecyclerView.Adapter<RecordAdapter.H>() {
     private var items: List<RecordEntity> = emptyList()
@@ -21,6 +23,7 @@ class RecordAdapter(
     }
 
     class H(v: View) : RecyclerView.ViewHolder(v) {
+        var addressJob: Job? = null
         val title: TextView = v.findViewById(R.id.title)
         val body: TextView = v.findViewById(R.id.body)
         val meta: TextView = v.findViewById(R.id.meta)
@@ -33,6 +36,8 @@ class RecordAdapter(
     override fun getItemCount() = items.size
 
     override fun onBindViewHolder(h: H, position: Int) {
+        h.addressJob?.cancel()
+        h.addressJob = null
         val r = items[position]
         val metaJson = try { JSONObject(r.metadataJson) } catch (_: Exception) { JSONObject() }
         val whenText = DateFormat.getDateTimeInstance().format(Date(r.timestamp))
@@ -92,16 +97,11 @@ class RecordAdapter(
                 h.meta.text = whenText
             }
             "location" -> {
-                val latitude = metaJson.optString("latitude")
-                val longitude = metaJson.optString("longitude")
                 val accuracy = metaJson.optString("accuracyMeters")
                 val trigger = metaJson.optString("trigger")
-                h.title.text = whenText
-                h.body.text = if (latitude.isNotBlank() && longitude.isNotBlank()) {
-                    "$latitude, $longitude"
-                } else {
-                    "Location data unavailable"
-                }
+                h.title.text = "Address unavailable"
+                h.addressJob = bindLocationName?.invoke(r, h.title)
+                h.body.text = whenText
                 h.meta.text = buildString {
                     if (accuracy.isNotBlank()) append("Accuracy: ±").append(accuracy).append(" m")
                     if (trigger.isNotBlank()) {
@@ -128,6 +128,12 @@ class RecordAdapter(
 
         h.delete.visibility = if (r.type == "alert" || r.type == "status") View.VISIBLE else View.GONE
         h.delete.setOnClickListener { onDelete(r) }
+    }
+
+    override fun onViewRecycled(holder: H) {
+        holder.addressJob?.cancel()
+        holder.addressJob = null
+        super.onViewRecycled(holder)
     }
 
     private fun formatDuration(seconds: Long): String {
