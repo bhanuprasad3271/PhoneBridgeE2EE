@@ -82,5 +82,37 @@ class SigningRestoreTest(unittest.TestCase):
         self.assertEqual(self.key.read_bytes(), b"existing key")
 
 
+
+class ApkVerificationTest(unittest.TestCase):
+    expected = "a" * 64
+
+    def verify_output(self, output, code=0):
+        result = subprocess.CompletedProcess([], code, output, "")
+        with patch.dict(os.environ, {"PHONEBRIDGE_SIGNING_SHA256": self.expected}), \
+                patch.object(apk_signing.subprocess, "run", return_value=result), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            apk_signing.verify("apksigner", "test.apk")
+
+    def test_current_and_legacy_formats(self):
+        for label in ("Signer #1", "V2 Signer:"):
+            with self.subTest(label=label):
+                self.verify_output(f"Number of signers: 1\n{label} certificate SHA-256 digest: {self.expected}\n")
+
+    def test_rejects_wrong_certificate(self):
+        with self.assertRaises(ValueError):
+            self.verify_output("Number of signers: 1\nV2 Signer: certificate SHA-256 digest: " + "b" * 64 + "\n")
+
+    def test_source_stamp_cannot_substitute_for_signer(self):
+        with self.assertRaises(ValueError):
+            self.verify_output(f"Number of signers: 1\nSource Stamp Signer certificate SHA-256 digest: {self.expected}\n")
+
+    def test_nonzero_verification_exit_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.verify_output(f"Number of signers: 1\nV2 Signer: certificate SHA-256 digest: {self.expected}\n", code=1)
+
+    def test_multiple_signers_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.verify_output(f"Number of signers: 2\nSigner #1 certificate SHA-256 digest: {self.expected}\n")
+
 if __name__ == "__main__":
     unittest.main()
