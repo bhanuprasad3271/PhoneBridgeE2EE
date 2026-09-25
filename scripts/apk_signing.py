@@ -54,8 +54,14 @@ def verify(apksigner, apk):
     expected = fingerprint()
     result = subprocess.run([apksigner, "verify", "--verbose", "--print-certs", apk],
                             capture_output=True, text=True)
-    digests = re.findall(r"Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)", result.stdout)
-    if result.returncode or [d.lower() for d in digests] != [expected]:
+    # Build Tools 37 labels certificates by scheme (e.g. "V2 Signer:");
+    # older tools use "Signer #1". Never accept a Source Stamp as the APK signer.
+    digests = re.findall(
+        r"^(?:Signer #\d+|V[1-4](?:\.\d+)? Signer:) certificate SHA-256 digest: ([0-9a-fA-F]{64})$",
+        result.stdout, re.MULTILINE,
+    )
+    signer_counts = re.findall(r"^Number of signers: (\d+)$", result.stdout, re.MULTILINE)
+    if result.returncode or signer_counts != ["1"] or {d.lower() for d in digests} != {expected}:
         # apksigner only reports public APK/certificate metadata, never the private key.
         print(result.stdout, file=sys.stderr)
         print(result.stderr, file=sys.stderr)
