@@ -7,6 +7,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -38,13 +41,47 @@ jobs:
       - name: Test Receiver timeline logic
         run: gradle :receiver:testDebugUnitTest --stacktrace
 
-      - name: Build debug APKs
+      - name: Test signing safeguards with a disposable key
+        run: python3 -m unittest discover -s scripts -p 'test_apk_signing.py' -v
+
+      # PR APKs have disposable debug certificates and must never be distributed.
+      - name: Check APK compilation
+        if: github.event_name == 'pull_request'
         run: gradle :receiver:assembleDebug :collector:assembleDebug --stacktrace
 
+      - name: Build and verify update APKs
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          PHONEBRIDGE_REQUIRE_SIGNING: 'true'
+          PHONEBRIDGE_KEYSTORE_PATH: ${{ runner.temp }}/phonebridge-signing.keystore
+          PHONEBRIDGE_KEYSTORE_BASE64: ${{ secrets.PHONEBRIDGE_KEYSTORE_BASE64 }}
+          PHONEBRIDGE_STORE_PASSWORD: ${{ secrets.PHONEBRIDGE_STORE_PASSWORD }}
+          PHONEBRIDGE_KEY_ALIAS: ${{ secrets.PHONEBRIDGE_KEY_ALIAS }}
+          PHONEBRIDGE_KEY_PASSWORD: ${{ secrets.PHONEBRIDGE_KEY_PASSWORD }}
+          PHONEBRIDGE_SIGNING_SHA256: ${{ vars.PHONEBRIDGE_SIGNING_SHA256 }}
+        run: |
+          set -euo pipefail
+          trap 'rm -f "$PHONEBRIDGE_KEYSTORE_PATH"' EXIT
+          python3 scripts/apk_signing.py restore
+          export PHONEBRIDGE_VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          gradle :receiver:assembleDebug :collector:assembleDebug --stacktrace
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          test -n "$APKSIGNER"
+          for module in receiver collector; do
+            python3 scripts/apk_signing.py verify "$APKSIGNER" "$module/build/outputs/apk/debug/$module-debug.apk"
+          done
+          {
+            echo "Commit: $GITHUB_SHA"
+            echo "Version code: $PHONEBRIDGE_VERSION_CODE"
+            echo "Certificate SHA-256: $PHONEBRIDGE_SIGNING_SHA256"
+          } > APK-BUILD.txt
+
       - name: Upload APKs
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: PhoneBridge-APKs
           path: |
             receiver/build/outputs/apk/debug/receiver-debug.apk
             collector/build/outputs/apk/debug/collector-debug.apk
+            APK-BUILD.txt
