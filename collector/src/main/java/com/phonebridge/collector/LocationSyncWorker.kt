@@ -1,10 +1,12 @@
 package com.phonebridge.collector
 
 import android.content.Context
+import android.location.Location
 import android.location.LocationManager
 import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -20,6 +22,11 @@ class LocationSyncWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
+
+    companion object {
+        private const val FRESH_LOCATION_MAX_AGE_MS = 30_000L
+        private const val FRESH_FIX_TIMEOUT_MS = 30_000L
+    }
 
     override suspend fun doWork(): Result {
         val prefs = BridgePrefs(applicationContext)
@@ -39,8 +46,6 @@ class LocationSyncWorker(
         }
         if (!signedIn) return Result.retry()
 
-        // In occasional mode Receiver refresh is queued. The next WorkManager run
-        // sees the request and returns that run's location as the requested update.
         val requestSnapshot = suspendCancellableCoroutine<DocumentSnapshot?> { cont ->
             FirebaseFirestore.getInstance().collection("pairs").document(pairId).get()
                 .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
@@ -48,38 +53,91 @@ class LocationSyncWorker(
         }
         val requestedTrigger = inputData.getString("locationTrigger").orEmpty()
         val specialTextTrigger = requestedTrigger == "special_text"
-        val requestId = if (specialTextTrigger) {
-            null
-        } else {
-            requestSnapshot?.getString("locationRequestId")
-                ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
-        }
+        val requestId = if (specialTextTrigger) null else requestSnapshot?.getString("locationRequestId")
+            ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
 
         if (requestId != null) {
             updateRequestStatus(pairId, requestId, "sender_received")
             updateRequestStatus(pairId, requestId, "getting_location")
         }
 
-        val fused = LocationServices.getFusedLocationProviderClient(applicationContext)
-        val last = try { fused.lastLocation.awaitOrNull() } catch (_: SecurityException) { null }
-
-        val now = System.currentTimeMillis()
-        val usableLast = last?.takeIf { it.time > 0L && now - it.time <= 15 * 60 * 1000L }
-        val location = usableLast ?: try {
-            val token = CancellationTokenSource()
-            fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, token.token)
-                .awaitOrNull() ?: last
-        } catch (_: SecurityException) {
-            last
+        val trigger = when {
+            specialTextTrigger -> "special_text"
+            requestId != null -> "manual_refresh"
+            else -> "periodic"
         }
 
-        if (location == null) {
+        val fused = LocationServices.getFusedLocationProviderClient(applicationContext)
+        val cached = try { fused.lastLocation.awaitOrNull() } catch (_: SecurityException) { null }
+
+        // Always ask for a new high-accuracy fix first. Google Play services may still return a
+        // recently acquired fix, so only accept it as "fresh" when it is <= 30 seconds old.
+        val firstFresh = requestFreshFix(fused)
+        if (isFresh(firstFresh)) {
+            if (requestId != null) updateRequestStatus(pairId, requestId, "encrypting_sending")
+            val sent = sendLocation(relay, firstFresh!!, trigger, requestId, "fresh")
+            finishRequest(pairId, requestId, sent)
+            return if (sent) Result.success() else Result.retry()
+        }
+
+        // Fresh acquisition failed/timed out. Only now may cache be used.
+        val fallback = cached ?: firstFresh
+        if (fallback == null) {
             if (requestId != null) updateRequestStatus(pairId, requestId, "location_failed")
-            return Result.success()
+            return Result.retry()
         }
 
         if (requestId != null) updateRequestStatus(pairId, requestId, "encrypting_sending")
+        val cachedSent = sendLocation(relay, fallback, trigger, requestId, "cached_fallback")
+        if (!cachedSent) {
+            finishRequest(pairId, requestId, false)
+            return Result.retry()
+        }
 
+        // The cached point is only an interim answer. Keep this worker alive for one more fresh
+        // acquisition window and send the fresh point as a second queue record as soon as it arrives.
+        if (requestId != null) updateRequestStatus(pairId, requestId, "cached_sent_waiting_fresh")
+        val laterFresh = requestFreshFix(fused)
+        if (isFresh(laterFresh)) {
+            val freshSent = sendLocation(relay, laterFresh!!, trigger, requestId, "fresh_after_cache")
+            finishRequest(pairId, requestId, freshSent)
+            return if (freshSent) Result.success() else Result.retry()
+        }
+
+        // Do not mark the request handled yet: a later WorkManager run can continue looking for
+        // the requested fresh point without requiring another Receiver refresh.
+        if (requestId != null) updateRequestStatus(pairId, requestId, "cached_sent_fresh_pending")
+        return Result.retry()
+    }
+
+    private suspend fun requestFreshFix(
+        fused: com.google.android.gms.location.FusedLocationProviderClient
+    ): Location? = try {
+        val token = CancellationTokenSource()
+        val request = CurrentLocationRequest.Builder()
+            .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+            .setMaxUpdateAgeMillis(0L)
+            .setDurationMillis(FRESH_FIX_TIMEOUT_MS)
+            .build()
+        fused.getCurrentLocation(request, token.token).awaitOrNull()
+    } catch (_: SecurityException) {
+        null
+    }
+
+    private fun isFresh(location: Location?): Boolean {
+        if (location == null || location.time <= 0L) return false
+        val age = System.currentTimeMillis() - location.time
+        return age in 0..FRESH_LOCATION_MAX_AGE_MS
+    }
+
+    private suspend fun sendLocation(
+        relay: FirebaseRelay,
+        location: Location,
+        trigger: String,
+        requestId: String?,
+        freshness: String
+    ): Boolean {
+        val now = System.currentTimeMillis()
         val timestamp = if (location.time > 0L) location.time else now
         val record = PlainRecord(
             type = "location",
@@ -94,42 +152,34 @@ class LocationSyncWorker(
                 "provider" to (location.provider ?: "fused"),
                 "locationTimeMs" to timestamp.toString(),
                 "collectedAtMs" to now.toString(),
-                "trigger" to when {
-                    specialTextTrigger -> "special_text"
-                    requestId != null -> "manual_refresh"
-                    else -> "periodic"
-                },
+                "trigger" to trigger,
+                "freshness" to freshness,
                 "requestId" to (requestId ?: "")
             )
         )
-
-        val sent = suspendCancellableCoroutine<Boolean> { cont ->
+        return suspendCancellableCoroutine { cont ->
             relay.send(record) { ok, _ -> if (cont.isActive) cont.resume(ok) }
         }
+    }
 
-        if (requestId != null) {
-            if (sent) {
-                prefs.lastHandledLocationRequestId = requestId
-                updateRequestStatus(pairId, requestId, "sent")
-            } else {
-                updateRequestStatus(pairId, requestId, "send_failed")
-            }
+    private fun finishRequest(pairId: String, requestId: String?, sent: Boolean) {
+        if (requestId == null) return
+        if (sent) {
+            BridgePrefs(applicationContext).lastHandledLocationRequestId = requestId
+            updateRequestStatus(pairId, requestId, "sent")
+        } else {
+            updateRequestStatus(pairId, requestId, "send_failed")
         }
-
-        return if (sent) Result.success() else Result.retry()
     }
 
     private fun updateRequestStatus(pairId: String, requestId: String, status: String) {
-        FirebaseFirestore.getInstance()
-            .collection("pairs")
-            .document(pairId)
-            .update(
-                mapOf(
-                    "locationRequestStatusId" to requestId,
-                    "locationRequestStatus" to status,
-                    "locationRequestStatusAtMs" to System.currentTimeMillis()
-                )
+        FirebaseFirestore.getInstance().collection("pairs").document(pairId).update(
+            mapOf(
+                "locationRequestStatusId" to requestId,
+                "locationRequestStatus" to status,
+                "locationRequestStatusAtMs" to System.currentTimeMillis()
             )
+        )
     }
 
     private suspend fun <T> Task<T>.awaitOrNull(): T? =
