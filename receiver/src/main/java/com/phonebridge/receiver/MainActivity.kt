@@ -31,6 +31,7 @@ import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.phonebridge.shared.CryptoBox
+import com.phonebridge.shared.WhatsAppNotificationClassifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -737,7 +738,7 @@ class MainActivity : AppCompatActivity() {
             "notification" -> cachedRows.filter {
                 it.type == "notification" || it.type == "message" || it.type == "wp_call"
             }
-            "message" -> cachedRows.filter { it.type == "message" }
+            "message" -> cachedRows.filter { it.type == "message" && !isWhatsAppBackgroundCheck(it) }
             "wp_call" -> cachedRows.filter { it.type == "wp_call" }
             "location" -> emptyList()
             "alert" -> cachedRows.filter { it.type == "alert" || it.type == "status" }
@@ -748,6 +749,19 @@ class MainActivity : AppCompatActivity() {
         adapter.submit(
             if (criteria == null || !criteria.isActive()) baseRows
             else baseRows.filter { criteria.matches(it) }
+        )
+    }
+
+    // Also hides old misclassified records and records from older Sender versions.
+    // Stored history is preserved and remains visible in Notifications.
+    private fun isWhatsAppBackgroundCheck(record: RecordEntity): Boolean {
+        val metadata = try { JSONObject(record.metadataJson) } catch (_: Exception) { null }
+        return WhatsAppNotificationClassifier.isBackgroundCheck(
+            packageName = record.source,
+            title = record.title,
+            body = record.body,
+            conversationTitle = metadata?.optString("conversationTitle").orEmpty(),
+            hasConversationMessages = metadata?.optBoolean("hasConversationMessages", false) == true
         )
     }
 

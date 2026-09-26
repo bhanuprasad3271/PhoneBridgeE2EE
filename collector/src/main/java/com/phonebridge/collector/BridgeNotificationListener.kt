@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.phonebridge.shared.PlainRecord
+import com.phonebridge.shared.WhatsAppNotificationClassifier
 
 class BridgeNotificationListener : NotificationListenerService() {
 
@@ -69,8 +70,17 @@ class BridgeNotificationListener : NotificationListenerService() {
             return
         }
 
-        val isMessage = n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName)
         val messageBody = bestBody(bigText, textLines, text)
+        val hasConversationMessages = !extras.getParcelableArray(Notification.EXTRA_MESSAGES).isNullOrEmpty()
+        val isBackgroundCheck = WhatsAppNotificationClassifier.isBackgroundCheck(
+            packageName = sbn.packageName,
+            title = title.ifBlank { appName },
+            body = messageBody,
+            conversationTitle = conversation,
+            hasConversationMessages = hasConversationMessages
+        )
+        val isMessage = !isBackgroundCheck &&
+            (n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName))
 
         // The configured special text is an independent deliberate location trigger.
         // Ordinary WhatsApp, Instagram and SMS/Messages notifications do not trigger
@@ -90,6 +100,7 @@ class BridgeNotificationListener : NotificationListenerService() {
             "sender" to title,
             "messageText" to text,
             "conversationTitle" to conversation,
+            "hasConversationMessages" to hasConversationMessages.toString(),
             "subText" to subText,
             "summaryText" to summary,
             "bigText" to bigText,
