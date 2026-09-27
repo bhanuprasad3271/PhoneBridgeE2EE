@@ -12,11 +12,15 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
 object LocationSharingScheduler {
     private const val PERIODIC_WORK = "phonebridge-location-sharing"
     private const val IMMEDIATE_WORK = "phonebridge-location-sharing-now"
+    private const val SPECIAL_WORK = "phonebridge-location-sharing-special-text"
+    const val SPECIAL_ATTEMPT = "specialRetryAttempt"
 
     fun hasForegroundLocation(context: Context): Boolean {
         return ContextCompat.checkSelfPermission(
@@ -69,15 +73,45 @@ object LocationSharingScheduler {
             .build()
 
         WorkManager.getInstance(context).enqueueUniqueWork(
-            IMMEDIATE_WORK,
+            if (trigger == "special_text") SPECIAL_WORK else IMMEDIATE_WORK,
             ExistingWorkPolicy.KEEP,
             request
         )
     }
 
+    // Append to the running special-text request; the next attempt starts only
+    // after this one finishes. Android may postpone any scheduled delay.
+    suspend fun scheduleSpecialRetry(context: Context, attempt: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            val delayMinutes = when (attempt) {
+                1, 2 -> 1L
+                3, 4 -> 5L
+                else -> 15L
+            }
+            val request = OneTimeWorkRequestBuilder<LocationSyncWorker>()
+                .setInputData(workDataOf(
+                    "locationTrigger" to "special_text",
+                    SPECIAL_ATTEMPT to attempt
+                ))
+                .setInitialDelay(delayMinutes, TimeUnit.MINUTES)
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 15, TimeUnit.MINUTES)
+                .build()
+            try {
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    SPECIAL_WORK,
+                    ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    request
+                ).result.get()
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
     fun cancel(context: Context) {
         WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_WORK)
         WorkManager.getInstance(context).cancelUniqueWork(IMMEDIATE_WORK)
+        WorkManager.getInstance(context).cancelUniqueWork(SPECIAL_WORK)
         context.stopService(android.content.Intent(context, LocationSharingService::class.java))
     }
 }
