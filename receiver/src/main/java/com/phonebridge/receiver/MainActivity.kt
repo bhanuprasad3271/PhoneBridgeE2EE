@@ -674,9 +674,10 @@ class MainActivity : AppCompatActivity() {
             "requested" -> 1
             "sender_received" -> 2
             "getting_location" -> 3
-            "encrypting_sending" -> 4
-            "sent" -> 5
-            "receiver_saved" -> 6
+            "interim_sent", "receiver_saved_interim", "waiting_fresh" -> 4
+            "encrypting_sending" -> 5
+            "sent" -> 6
+            "receiver_saved" -> 7
             "location_unavailable", "location_failed", "send_failed" -> 99
             else -> return
         }
@@ -688,16 +689,19 @@ class MainActivity : AppCompatActivity() {
             "requested" -> "Request sent → waiting for Sender…"
             "sender_received" -> "Request sent → Sender received"
             "getting_location" -> "Request sent → Sender received → getting fresh location…"
-            "encrypting_sending" -> "Sender received → GPS received → encrypting & sending…"
-            "sent" -> "Fresh location sent → waiting for Receiver save…"
-            "receiver_saved" -> "✓ Fresh location received → saved to history"
+            "interim_sent" -> "Cached location sent → waiting for a fresh location…"
+            "receiver_saved_interim" -> "Cached location saved → waiting for a fresh location…"
+            "waiting_fresh" -> "Sender is still waiting for a fresh location…"
+            "encrypting_sending" -> "Sender received → location received → encrypting & sending…"
+            "sent" -> "Location sent → waiting for Receiver save…"
+            "receiver_saved" -> "✓ Location received → saved to history"
             "location_unavailable" -> "Sender received → device Location is off"
             "location_failed" -> "Sender received → fresh location unavailable"
             "send_failed" -> "GPS received → encrypted upload failed"
             else -> locationRefreshProgress.text
         }
 
-        if (stage == 6 || stage == 99) {
+        if (stage == 7 || stage == 99) {
             activeLocationRefreshRequestId = null
             locationRefreshButton.isEnabled = true
         }
@@ -784,10 +788,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             if (savedForRequest != null) {
-                locationRefreshStage = 6
-                locationRefreshProgress.text = "✓ Fresh location received → saved to history"
-                activeLocationRefreshRequestId = null
-                locationRefreshButton.isEnabled = true
+                val interim = try {
+                    JSONObject(savedForRequest.metadataJson)
+                        .optString("locationFreshness") == "cached_interim"
+                } catch (_: Exception) {
+                    false
+                }
+                if (interim) {
+                    if (locationRefreshStage < 5) {
+                        locationRefreshStage = 4
+                        locationRefreshProgress.text =
+                            "Cached location saved → waiting for a fresh location…"
+                    }
+                } else {
+                    locationRefreshStage = 7
+                    locationRefreshProgress.text = "✓ Location received → saved to history"
+                    activeLocationRefreshRequestId = null
+                    locationRefreshButton.isEnabled = true
+                }
             }
         }
 
@@ -833,6 +851,7 @@ class MainActivity : AppCompatActivity() {
         val ageMs = (System.currentTimeMillis() - record.timestamp).coerceAtLeast(0L)
 
         locationStatus.text = when {
+            meta.optString("locationFreshness") == "cached_interim" -> "Cached · waiting for new fix"
             ageMs < 5 * 60 * 1000L -> "Live"
             ageMs <= 30 * 60 * 1000L -> "Recent"
             else -> "Old location"

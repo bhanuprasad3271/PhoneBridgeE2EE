@@ -104,6 +104,14 @@ class RecordAdapter(
                 h.body.text = whenText
                 h.meta.text = buildString {
                     if (accuracy.isNotBlank()) append("Accuracy: ±").append(accuracy).append(" m")
+                    val freshness = metaJson.optString("locationFreshness")
+                    if (freshness == "cached_interim") {
+                        if (isNotEmpty()) append(" · ")
+                        append("Cached interim · waiting for new fix")
+                    } else if (freshness == "cached_recent") {
+                        if (isNotEmpty()) append(" · ")
+                        append("Recent cache (<1 min)")
+                    }
                     if (trigger.isNotBlank()) {
                         if (isNotEmpty()) append(" · ")
                         append(

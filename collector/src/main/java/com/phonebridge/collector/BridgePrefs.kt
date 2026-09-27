@@ -7,7 +7,12 @@ class BridgePrefs(ctx: Context) {
 
     var pairId: String?
         get() = p.getString("pairId", null)
-        set(v) = p.edit().putString("pairId", v).apply()
+        set(v) {
+            val changed = v != pairId
+            val edit = p.edit().putString("pairId", v)
+            if (changed) edit.remove("lastSentLocationTimeMs")
+            edit.apply()
+        }
 
     var receiverPublicKey: String?
         get() = p.getString("receiverPublicKey", null)
@@ -40,6 +45,10 @@ class BridgePrefs(ctx: Context) {
     var lastLocationPermissionState: String?
         get() = p.getString("lastLocationPermissionState", null)
         set(v) = p.edit().putString("lastLocationPermissionState", v).apply()
+
+    var lastSentLocationTimeMs: Long
+        get() = p.getLong("lastSentLocationTimeMs", 0L)
+        set(v) = p.edit().putLong("lastSentLocationTimeMs", v).apply()
 
     var lastHandledLocationRequestId: String?
         get() = p.getString("lastHandledLocationRequestId", null)
