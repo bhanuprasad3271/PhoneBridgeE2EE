@@ -5,6 +5,7 @@ import android.location.LocationManager
 import android.os.Build
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -21,17 +22,16 @@ class LocationSyncWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
 
+    private companion object {
+        const val FIX_TIMEOUT_MS = 30_000L
+        const val CLOCK_TOLERANCE_MS = 10_000L
+    }
+
     override suspend fun doWork(): Result {
         val prefs = BridgePrefs(applicationContext)
         if (!prefs.locationSharingEnabled) return Result.success()
         val pairId = prefs.pairId ?: return Result.success()
         if (prefs.receiverPublicKey == null) return Result.success()
-        if (!LocationSharingScheduler.hasBackgroundLocation(applicationContext)) return Result.success()
-
-        val locationManager = applicationContext.getSystemService(LocationManager::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !locationManager.isLocationEnabled) {
-            return Result.success()
-        }
 
         val relay = FirebaseRelay(applicationContext)
         val signedIn = suspendCancellableCoroutine<Boolean> { cont ->
@@ -55,22 +55,39 @@ class LocationSyncWorker(
                 ?.takeIf { it.isNotBlank() && it != prefs.lastHandledLocationRequestId }
         }
 
-        if (requestId != null) {
-            updateRequestStatus(pairId, requestId, "sender_received")
-            updateRequestStatus(pairId, requestId, "getting_location")
+        if (requestId != null) updateRequestStatus(pairId, requestId, "sender_received")
+        if (!LocationSharingScheduler.hasBackgroundLocation(applicationContext)) {
+            if (requestId != null) updateRequestStatus(pairId, requestId, "location_unavailable")
+            return Result.success()
         }
+        val locationManager = applicationContext.getSystemService(LocationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !locationManager.isLocationEnabled) {
+            if (requestId != null) updateRequestStatus(pairId, requestId, "location_unavailable")
+            return Result.success()
+        }
+        if (requestId != null) updateRequestStatus(pairId, requestId, "getting_location")
 
+        // A refresh must contain a fix measured for this attempt. getCurrentLocation
+        // can otherwise serve a cached fix, and falling back to lastLocation can
+        // silently turn a refresh into an old position.
+        val startedAt = System.currentTimeMillis()
         val fused = LocationServices.getFusedLocationProviderClient(applicationContext)
-        val last = try { fused.lastLocation.awaitOrNull() } catch (_: SecurityException) { null }
-
-        val now = System.currentTimeMillis()
-        val usableLast = last?.takeIf { it.time > 0L && now - it.time <= 15 * 60 * 1000L }
-        val location = usableLast ?: try {
-            val token = CancellationTokenSource()
-            fused.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, token.token)
-                .awaitOrNull() ?: last
+        val request = CurrentLocationRequest.Builder()
+            .setPriority(
+                if (requestId != null || specialTextTrigger) Priority.PRIORITY_HIGH_ACCURACY
+                else Priority.PRIORITY_BALANCED_POWER_ACCURACY
+            )
+            .setMaxUpdateAgeMillis(0L)
+            .setDurationMillis(FIX_TIMEOUT_MS)
+            .build()
+        val token = CancellationTokenSource()
+        val location = try {
+            fused.getCurrentLocation(request, token.token).awaitOrNull()
+                ?.takeIf { it.time > 0L && it.time >= startedAt - CLOCK_TOLERANCE_MS }
         } catch (_: SecurityException) {
-            last
+            null
+        } finally {
+            token.cancel()
         }
 
         if (location == null) {
@@ -80,7 +97,8 @@ class LocationSyncWorker(
 
         if (requestId != null) updateRequestStatus(pairId, requestId, "encrypting_sending")
 
-        val timestamp = if (location.time > 0L) location.time else now
+        val now = System.currentTimeMillis()
+        val timestamp = location.time
         val record = PlainRecord(
             type = "location",
             timestamp = timestamp,
