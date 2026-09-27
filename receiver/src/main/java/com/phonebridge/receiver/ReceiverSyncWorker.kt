@@ -122,16 +122,23 @@ class ReceiverSyncWorker(
             ""
         }
         if (locationRequestId.isNotBlank()) {
-            fs.collection("pairs")
+            val interim = metadataJson.optString("locationFreshness") == "cached_interim"
+            val currentRequest = fs.collection("pairs").document(pairId).get().await()
+            val currentStatus = currentRequest.getString("locationRequestStatus")
+            if (currentRequest.getString("locationRequestId") == locationRequestId &&
+                (!interim || currentStatus != "sent" && currentStatus != "receiver_saved")
+            ) {
+                fs.collection("pairs")
                 .document(pairId)
                 .update(
                     mapOf(
                         "locationRequestStatusId" to locationRequestId,
-                        "locationRequestStatus" to "receiver_saved",
+                        "locationRequestStatus" to if (interim) "receiver_saved_interim" else "receiver_saved",
                         "locationRequestStatusAtMs" to System.currentTimeMillis()
                     )
                 )
                 .await()
+            }
         }
 
         // Delivery acknowledgement: the Firebase queue item is removed only after
