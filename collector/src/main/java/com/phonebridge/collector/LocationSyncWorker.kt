@@ -17,6 +17,8 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.phonebridge.shared.PlainRecord
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -31,6 +33,7 @@ class LocationSyncWorker(
         const val CLOCK_TOLERANCE_MS = 10_000L
         const val RECENT_CACHE_AGE_MS = 60_000L
         const val MAX_INTERIM_AGE_MS = 15 * 60_000L
+        val sendMutex = Mutex()
     }
 
     override suspend fun doWork(): Result {
@@ -39,11 +42,12 @@ class LocationSyncWorker(
         val pairId = prefs.pairId ?: return Result.success()
         if (prefs.receiverPublicKey == null) return Result.success()
 
+        val specialTextTrigger = inputData.getString("locationTrigger") == "special_text"
         val relay = FirebaseRelay(applicationContext)
         val signedIn = suspendCancellableCoroutine<Boolean> { cont ->
             relay.ensureSignedIn { ok, _ -> if (cont.isActive) cont.resume(ok) }
         }
-        if (!signedIn) return Result.retry()
+        if (!signedIn) return retryPending(specialTextTrigger)
 
         // In occasional mode Receiver refresh is queued. The next WorkManager run
         // sees the request and returns that run's location as the requested update.
@@ -52,8 +56,6 @@ class LocationSyncWorker(
                 .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
                 .addOnFailureListener { if (cont.isActive) cont.resume(null) }
         }
-        val requestedTrigger = inputData.getString("locationTrigger").orEmpty()
-        val specialTextTrigger = requestedTrigger == "special_text"
         val requestId = if (specialTextTrigger) {
             null
         } else {
@@ -108,8 +110,11 @@ class LocationSyncWorker(
             if (requestId != null) updateRequestStatus(pairId, requestId, "waiting_fresh")
             // WorkManager will retry while the request is pending. Normal periodic
             // work will also try again; neither keeps GPS running continuously.
-            return if (requestId != null || specialTextTrigger) Result.retry()
-            else Result.success()
+            return when {
+                specialTextTrigger -> retryPending(true)
+                requestId != null -> Result.retry()
+                else -> Result.success()
+            }
         }
 
         if (requestId != null && freshness != "cached_interim") {
@@ -137,15 +142,33 @@ class LocationSyncWorker(
                 "requestId" to (requestId ?: "")
             )
         )
-        val sent = suspendCancellableCoroutine<Boolean> { cont ->
-            relay.send(record) { ok, _ -> if (cont.isActive) cont.resume(ok) }
+        // Periodic and explicit workers may run together. Serialize the check
+        // and send so they cannot both report the same measured fix as new.
+        val outcome = sendMutex.withLock {
+            if (candidate.time <= prefs.lastSentLocationTimeMs) {
+                SendOutcome.ALREADY_SENT
+            } else {
+                val sent = suspendCancellableCoroutine<Boolean> { cont ->
+                    relay.send(record) { ok, _ -> if (cont.isActive) cont.resume(ok) }
+                }
+                if (sent) {
+                    prefs.lastSentLocationTimeMs = candidate.time
+                    SendOutcome.SENT
+                } else SendOutcome.FAILED
+            }
         }
-        if (!sent) {
-            if (requestId != null) updateRequestStatus(pairId, requestId, "send_failed")
-            return Result.retry()
+        if (outcome != SendOutcome.SENT) {
+            if (requestId != null) {
+                updateRequestStatus(pairId, requestId,
+                    if (outcome == SendOutcome.FAILED) "send_failed" else "waiting_fresh")
+            }
+            return when {
+                specialTextTrigger -> retryPending(true)
+                requestId != null || outcome == SendOutcome.FAILED -> Result.retry()
+                else -> Result.success()
+            }
         }
 
-        prefs.lastSentLocationTimeMs = candidate.time
         if (requestId != null) {
             if (freshness == "cached_interim") {
                 updateRequestStatus(pairId, requestId, "interim_sent")
@@ -154,9 +177,22 @@ class LocationSyncWorker(
                 updateRequestStatus(pairId, requestId, "sent")
             }
         }
-        return if (freshness == "cached_interim" && (requestId != null || specialTextTrigger)) {
-            Result.retry()
-        } else Result.success()
+        return when {
+            freshness != "cached_interim" -> Result.success()
+            specialTextTrigger -> retryPending(true)
+            requestId != null -> Result.retry()
+            else -> Result.success()
+        }
+    }
+
+    private enum class SendOutcome { SENT, FAILED, ALREADY_SENT }
+
+    private suspend fun retryPending(specialTextTrigger: Boolean): Result {
+        if (!specialTextTrigger) return Result.retry()
+        val nextAttempt = inputData.getInt(LocationSharingScheduler.SPECIAL_ATTEMPT, 0) + 1
+        return if (LocationSharingScheduler.scheduleSpecialRetry(applicationContext, nextAttempt)) {
+            Result.success()
+        } else Result.retry()
     }
 
     private suspend fun seekNewFix(
