@@ -25,7 +25,6 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
-import androidx.room.Room
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
@@ -34,6 +33,7 @@ import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.WhatsAppNotificationClassifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -52,7 +52,7 @@ class MainActivity : AppCompatActivity() {
     private val fs by lazy { FirebaseFirestore.getInstance() }
     private val crypto by lazy { CryptoBox(this, "phonebridge_receiver_ecdh") }
     private val db by lazy {
-        Room.databaseBuilder(this, LocalDb::class.java, "phonebridge.db").build()
+        LocalDb.get(this)
     }
     private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
 
@@ -108,6 +108,8 @@ class MainActivity : AppCompatActivity() {
     private var cachedRows: List<RecordEntity> = emptyList()
     private var latestLocation: RecordEntity? = null
     private val sectionFilters = mutableMapOf<String, FilterCriteria>()
+    private lateinit var recordDates: RecordDates
+    private val monitoring by lazy { MonitoringUi(this) { cachedRows } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -152,6 +154,15 @@ class MainActivity : AppCompatActivity() {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = this@MainActivity.adapter
         }
+        recordDates = RecordDates(this) {
+            sectionFilters[currentFilter]?.let { sectionFilters[currentFilter] = it.copy(fromMs = null, toMs = null) }
+            updateFilterButton()
+            applyFilter()
+        }
+        (recordList.parent as android.widget.LinearLayout).let { parent ->
+            parent.addView(recordDates.view, parent.indexOfChild(recordList))
+        }
+        findViewById<Button>(R.id.btnMonitoring).setOnClickListener { monitoring.show() }
 
         locationHistoryAdapter = RecordAdapter(bindLocationName = locationDisplayNames::bind)
         locationHistoryList.apply {
@@ -199,6 +210,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnCreatePair).setOnClickListener { createPairCode() }
     }
 
+    private var liveDataJob: kotlinx.coroutines.Job? = null
+
     override fun onStart() {
         super.onStart()
         locationDisplayNames.reloadSavedNames()
@@ -211,13 +224,17 @@ class MainActivity : AppCompatActivity() {
             )
             updateReceiverRegistered = true
         }
-        lifecycleScope.launch { refreshLocal() }
+        liveDataJob = lifecycleScope.launch {
+            db.dao().observeAll().collectLatest { refreshLocal() }
+        }
         if (auth.currentUser != null) {
             prefs.getString("pairId", null)?.let { listen(it) }
         }
     }
 
     override fun onStop() {
+        liveDataJob?.cancel()
+        liveDataJob = null
         queueRegistration?.remove()
         queueRegistration = null
         pairRegistration?.remove()
@@ -230,6 +247,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        monitoring.close()
         recentAddressJob?.cancel()
         queueRegistration?.remove()
         pairRegistration?.remove()
@@ -243,6 +261,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectTab(filter: String, title: String) {
         currentFilter = filter
+        recordDates.select(filter)
         listTitle.text = title
         val isLocation = filter == "location"
 
@@ -710,7 +729,7 @@ class MainActivity : AppCompatActivity() {
     private fun enqueueReceiverSync() {
         WorkManager.getInstance(this).enqueueUniqueWork(
             "receiver-foreground-sync",
-            ExistingWorkPolicy.KEEP,
+            ExistingWorkPolicy.APPEND_OR_REPLACE,
             OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
         )
     }
@@ -724,7 +743,7 @@ class MainActivity : AppCompatActivity() {
             .collection("queue")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    dashboardStatus.text = "Connected to Sender • sync will retry when reopened"
+                    dashboardStatus.text = "Connected to Sender • waiting to reconnect"
                     return@addSnapshotListener
                 }
 
@@ -750,9 +769,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val criteria = sectionFilters[currentFilter]
+        recordDates.customRange(criteria?.fromMs, criteria?.toMs)
+        val datedRows = if (criteria?.fromMs != null || criteria?.toMs != null) baseRows
+            else baseRows.filter { recordDates.matches(it) }
         adapter.submit(
-            if (criteria == null || !criteria.isActive()) baseRows
-            else baseRows.filter { criteria.matches(it) }
+            if (criteria == null || !criteria.isActive()) datedRows
+            else datedRows.filter { criteria.matches(it) }
         )
     }
 
@@ -770,7 +792,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun refreshLocal() {
-        cachedRows = withContext(Dispatchers.IO) { db.dao().all() }
+        cachedRows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().all()) }
+        monitoring.refresh()
         val locationRows = cachedRows.filter { it.type == "location" }
         latestLocation = locationRows.firstOrNull()
         locationHistoryAdapter.submit(locationRows)

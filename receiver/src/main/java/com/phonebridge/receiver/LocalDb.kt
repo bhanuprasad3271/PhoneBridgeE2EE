@@ -1,6 +1,8 @@
 package com.phonebridge.receiver
 
 import androidx.room.*
+import android.content.Context
+import kotlinx.coroutines.flow.Flow
 
 @Entity(tableName = "records")
 data class RecordEntity(
@@ -15,6 +17,9 @@ data class RecordEntity(
 
 @Dao
 interface RecordDao {
+    @Query("SELECT * FROM records ORDER BY timestamp DESC")
+    fun observeAll(): Flow<List<RecordEntity>>
+
     @Query("SELECT * FROM records ORDER BY timestamp DESC")
     suspend fun all(): List<RecordEntity>
 
@@ -40,4 +45,13 @@ interface RecordDao {
 @Database(entities = [RecordEntity::class], version = 1)
 abstract class LocalDb : RoomDatabase() {
     abstract fun dao(): RecordDao
+
+    companion object {
+        @Volatile private var instance: LocalDb? = null
+
+        fun get(context: Context): LocalDb = instance ?: synchronized(this) {
+            instance ?: Room.databaseBuilder(context.applicationContext, LocalDb::class.java, "phonebridge.db")
+                .build().also { instance = it }
+        }
+    }
 }

@@ -2,7 +2,6 @@ package com.phonebridge.receiver
 
 import android.content.Context
 import android.content.Intent
-import androidx.room.Room
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.google.firebase.auth.FirebaseAuth
@@ -10,6 +9,7 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.QueryDocumentSnapshot
 import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.JsonCodec
+import com.phonebridge.shared.MessageIdentity
 import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 
@@ -27,7 +27,7 @@ class ReceiverSyncWorker(
     private val auth = FirebaseAuth.getInstance()
     private val fs = FirebaseFirestore.getInstance()
     private val crypto = CryptoBox(appContext, "phonebridge_receiver_ecdh")
-    private val db = Room.databaseBuilder(appContext, LocalDb::class.java, "phonebridge.db").build()
+    private val db = LocalDb.get(appContext)
 
     override suspend fun doWork(): Result {
         val prefs = applicationContext.getSharedPreferences("bridge", Context.MODE_PRIVATE)
@@ -83,6 +83,8 @@ class ReceiverSyncWorker(
         val sessionKey = metadataJson.optString("sessionKey")
 
         val localId = when {
+            record.type == "message" && record.metadata["messageId"]?.matches(Regex("msg_v1_[0-9a-f]{64}")) == true ->
+                "message_" + MessageIdentity.hash(pairId, collectorKey, record.metadata.getValue("messageId"))
             (record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank() ->
                 record.type + "_" + sessionKey.hashCode()
             else -> id
