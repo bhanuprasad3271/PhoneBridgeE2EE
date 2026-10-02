@@ -4,6 +4,7 @@ import android.app.Notification
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import com.phonebridge.shared.PlainRecord
+import com.phonebridge.shared.MessageIdentity
 import com.phonebridge.shared.WhatsAppNotificationClassifier
 
 class BridgeNotificationListener : NotificationListenerService() {
@@ -19,6 +20,8 @@ class BridgeNotificationListener : NotificationListenerService() {
     private val messageDedupePrefs by lazy {
         getSharedPreferences("message_dedupe", MODE_PRIVATE)
     }
+
+    private val pendingMessages = java.util.Collections.synchronizedSet(mutableSetOf<String>())
 
     override fun onListenerConnected() {
         super.onListenerConnected()
@@ -89,9 +92,6 @@ class BridgeNotificationListener : NotificationListenerService() {
             tryTriggerSpecialTextLocation(prefs, text, bigText, textLines)
         }
 
-        if (isMessage && isDuplicateMessageEvent(sbn)) {
-            return
-        }
 
         val metadata = linkedMapOf(
             "appName" to appName,
@@ -107,6 +107,35 @@ class BridgeNotificationListener : NotificationListenerService() {
             "textLines" to textLines.joinToString("\n"),
             "notificationKey" to sbn.key
         )
+
+        if (isMessage) {
+            // Group summaries repeat child notifications rather than representing new messages.
+            if (n.flags and Notification.FLAG_GROUP_SUMMARY != 0) return
+            val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES).orEmpty()
+                .mapNotNull { it as? android.os.Bundle }
+            val thread = conversation.ifBlank { title }
+            if (messages.isNotEmpty()) {
+                messages.forEach { message ->
+                    val body = message.getCharSequence("text")?.toString().orEmpty()
+                    val personName = if (android.os.Build.VERSION.SDK_INT >= 28)
+                        (message.getParcelable<android.os.Parcelable>("sender_person") as? android.app.Person)?.name?.toString()
+                        else null
+                    val sender = personName ?: message.getCharSequence("sender")?.toString().orEmpty().ifBlank { title }
+                    val at = message.getLong("time", 0L).takeIf { it > 0L } ?: sbn.postTime
+                    if (body.isBlank() || at < prefs.pairedAtMs) return@forEach
+                    if (listOf("otp", "verification code", "security code", "one-time password")
+                        .any { it in body.lowercase() }) return@forEach
+                    sendMessage(prefs, sbn.packageName, thread, sender, body, at, metadata)
+                }
+            } else {
+                val at = n.`when`.takeIf { it > 0L } ?: sbn.postTime
+                if (at >= prefs.pairedAtMs) {
+                    sendMessage(prefs, sbn.packageName, thread, title.ifBlank { appName },
+                        messageBody, at, metadata)
+                }
+            }
+            return
+        }
 
         val record = PlainRecord(
             type = if (isMessage) "message" else "notification",
@@ -236,50 +265,43 @@ class BridgeNotificationListener : NotificationListenerService() {
         else -> text
     }
 
-    private fun isDuplicateMessageEvent(sbn: StatusBarNotification): Boolean {
-        val now = System.currentTimeMillis()
-        val eventTime = latestMessageEventTime(sbn.notification)
-            .takeIf { it > 0L }
-            ?: sbn.notification.`when`.takeIf { it > 0L }
-            ?: sbn.postTime
-
-        val eventIdentity = listOf(
-            sbn.packageName,
-            sbn.key,
-            eventTime.toString()
-        ).joinToString("|")
-
-        val prefKey = "event_${eventIdentity.hashCode()}"
-        val seenAt = messageDedupePrefs.getLong(prefKey, 0L)
-        val duplicate = seenAt > 0L
-
-        if (!duplicate) {
-            messageDedupePrefs.edit().putLong(prefKey, now).apply()
-        }
-
-        val lastCleanup = messageDedupePrefs.getLong("last_cleanup", 0L)
-        if (now - lastCleanup > 10 * 60 * 1000L) {
-            val editor = messageDedupePrefs.edit()
-            messageDedupePrefs.all.forEach { (key, value) ->
-                if (key.startsWith("event_") && value is Long && now - value > 60 * 60 * 1000L) {
-                    editor.remove(key)
+    private fun sendMessage(
+        prefs: BridgePrefs, app: String, conversation: String, sender: String,
+        body: String, timestamp: Long, metadata: Map<String, String>
+    ) {
+        val pair = prefs.pairId ?: return
+        val receiverKey = prefs.receiverPublicKey ?: return
+        val messageId = MessageIdentity.of(app, conversation, sender, body, timestamp)
+        val prefKey = "sent_" + MessageIdentity.hash(pair, receiverKey, prefs.pairedAtMs.toString(), messageId)
+        if (messageDedupePrefs.contains(prefKey) || !pendingMessages.add(prefKey)) return
+        val record = PlainRecord("message", timestamp, app, sender, body,
+            metadata + mapOf("messageId" to messageId, "originalMessageAtMs" to timestamp.toString(),
+                "sender" to sender, "conversationTitle" to conversation))
+        val relay = FirebaseRelay(this)
+        relay.ensureSignedIn { ok, _ ->
+            if (!ok) {
+                pendingMessages.remove(prefKey)
+            } else {
+                relay.send(record) { success, _ ->
+                    if (success) {
+                        val now = System.currentTimeMillis()
+                        val edit = messageDedupePrefs.edit().putLong(prefKey, now)
+                        if (now - messageDedupePrefs.getLong("last_cleanup", 0L) > 600_000L) {
+                            val entries = messageDedupePrefs.all.filterKeys { it.startsWith("sent_") }
+                                .entries.sortedByDescending { it.value as? Long ?: 0L }
+                            entries.forEachIndexed { index, entry ->
+                                if (index >= 4000 || now - (entry.value as? Long ?: 0L) > 7 * 86_400_000L)
+                                    edit.remove(entry.key)
+                            }
+                            edit.putLong("last_cleanup", now)
+                        }
+                        edit.apply()
+                    }
+                    // Failed delivery must remain eligible for the next notification update.
+                    pendingMessages.remove(prefKey)
                 }
             }
-            editor.putLong("last_cleanup", now).apply()
         }
-
-        return duplicate
-    }
-
-    private fun latestMessageEventTime(notification: Notification): Long {
-        val messages = notification.extras.getParcelableArray(Notification.EXTRA_MESSAGES).orEmpty()
-        var latest = 0L
-        messages.forEach { item ->
-            val bundle = item as? android.os.Bundle ?: return@forEach
-            val time = bundle.getLong("time", 0L)
-            if (time > latest) latest = time
-        }
-        return latest
     }
 
     private fun appNameFor(packageName: String): String = try {

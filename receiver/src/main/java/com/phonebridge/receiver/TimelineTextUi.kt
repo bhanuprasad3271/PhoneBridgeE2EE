@@ -42,6 +42,8 @@ class TimelineTextUi(private val activity: AppCompatActivity, private val places
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val view = convertView as? ColumnsView ?: ColumnsView(context)
                 view.bind(rows[position])
+                view.setMapAction(rows[position].place) { TimelineMaps.open(activity, entries[position].position) }
+                view.setOnClickListener { onSelected(position) }
                 return view
             }
         }
@@ -89,12 +91,13 @@ class TimelineTextUi(private val activity: AppCompatActivity, private val places
         private val time: TextView
         private val place: TextView
         private val duration: TextView
+        private val maps: TextView
 
         init {
             orientation = HORIZONTAL
             gravity = Gravity.TOP
             val density = resources.displayMetrics.density
-            val horizontal = (16 * density).toInt()
+            val horizontal = (8 * density).toInt()
             val vertical = ((if (header) 8 else 12) * density).toInt()
             setPadding(horizontal, vertical, horizontal, vertical)
             if (!header) minimumHeight = (56 * density).toInt()
@@ -110,6 +113,25 @@ class TimelineTextUi(private val activity: AppCompatActivity, private val places
             time = cell(0.32f, Gravity.START)
             place = cell(0.46f, Gravity.START, bold = true).apply { setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0) }
             duration = cell(0.22f, Gravity.END)
+            maps = TextView(context).apply {
+                text = if (header) "Maps" else "↗"
+                textSize = if (header) 11f else 22f
+                gravity = Gravity.CENTER
+                if (header) { setTypeface(typeface, Typeface.BOLD); alpha = 0.75f }
+                else {
+                    val background = android.util.TypedValue()
+                    context.theme.resolveAttribute(android.R.attr.selectableItemBackground, background, true)
+                    setBackgroundResource(background.resourceId)
+                    isFocusable = true
+                }
+                addView(this, LayoutParams((48 * density).toInt(),
+                    if (header) ViewGroup.LayoutParams.WRAP_CONTENT else (48 * density).toInt()))
+            }
+        }
+
+        fun setMapAction(place: String, action: () -> Unit) {
+            maps.contentDescription = "Open $place in Google Maps"
+            maps.setOnClickListener { action() }
         }
 
         fun bind(row: TimelineTextColumns) {

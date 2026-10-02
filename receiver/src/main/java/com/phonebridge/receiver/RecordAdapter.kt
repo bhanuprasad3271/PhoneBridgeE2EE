@@ -6,6 +6,8 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.AsyncListDiffer
+import androidx.recyclerview.widget.DiffUtil
 import org.json.JSONObject
 import kotlinx.coroutines.Job
 import java.text.DateFormat
@@ -13,13 +15,22 @@ import java.util.Date
 
 class RecordAdapter(
     private val bindLocationName: ((RecordEntity, TextView) -> Job?)? = null,
+    private val asyncUpdates: Boolean = false,
     private val onDelete: (RecordEntity) -> Unit = {}
 ) : RecyclerView.Adapter<RecordAdapter.H>() {
-    private var items: List<RecordEntity> = emptyList()
+    private val differ = AsyncListDiffer(this, object : DiffUtil.ItemCallback<RecordEntity>() {
+        override fun areItemsTheSame(old: RecordEntity, new: RecordEntity) = old.id == new.id
+        override fun areContentsTheSame(old: RecordEntity, new: RecordEntity) = old == new
+    })
+    private var immediateItems: List<RecordEntity> = emptyList()
+    private val items get() = if (asyncUpdates) differ.currentList else immediateItems
 
     fun submit(v: List<RecordEntity>) {
-        items = v
-        notifyDataSetChanged()
+        if (asyncUpdates) differ.submitList(v)
+        else {
+            immediateItems = v
+            notifyDataSetChanged()
+        }
     }
 
     class H(v: View) : RecyclerView.ViewHolder(v) {

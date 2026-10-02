@@ -39,8 +39,9 @@ class TimelineStayUi(private val activity: AppCompatActivity, private val mapVie
             .setPositiveButton("Close", null)
             .show()
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { places.showActions(stay.position) }
+        TimelineMaps.bindMessage(dialog, message.replace("ADDRESS_PLACEHOLDER", places.immediateName(stay.position)), stay.position)
         places.bindName(dialog, stay.position) { name ->
-            dialog.setMessage(message.replace("ADDRESS_PLACEHOLDER", name))
+            TimelineMaps.bindMessage(dialog, message.replace("ADDRESS_PLACEHOLDER", name), stay.position)
         }
     }
 

@@ -11,9 +11,11 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
-import androidx.room.Room
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -43,7 +45,7 @@ import java.util.Date
 import java.util.Locale
 
 class LocationTimelineActivity : AppCompatActivity() {
-    private val db by lazy { Room.databaseBuilder(this, LocalDb::class.java, "phonebridge.db").build() }
+    private val db by lazy { LocalDb.get(this) }
     private lateinit var mapView: MapView
     private lateinit var mapStatus: TextView
     private lateinit var dateButton: Button
@@ -58,6 +60,8 @@ class LocationTimelineActivity : AppCompatActivity() {
     private lateinit var stayUi: TimelineStayUi
     private var currentStays: List<TimelineEntry.Stay> = emptyList()
     private var dayLoadJob: Job? = null
+    private var liveDataJob: Job? = null
+    private var queueListener: com.google.firebase.firestore.ListenerRegistration? = null
     private var manualLight: Boolean? = null
     private var mapDataStore: MapDataStore? = null
     private var tileCache: TileCache? = null
@@ -108,6 +112,38 @@ class LocationTimelineActivity : AppCompatActivity() {
                 selected.get(Calendar.YEAR), selected.get(Calendar.MONTH), selected.get(Calendar.DAY_OF_MONTH)).show()
         }
         loadDay()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        liveDataJob = lifecycleScope.launch {
+            db.dao().observeAll().map { rows -> rows.filter { it.type == "location" } }
+                .distinctUntilChanged().collect { loadDay() }
+        }
+        val pairId = getSharedPreferences("bridge", MODE_PRIVATE).getString("pairId", null)
+        if (pairId != null) {
+            queueListener = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                .collection("pairs").document(pairId).collection("queue")
+                .addSnapshotListener { snapshot, error ->
+                    if (error == null && snapshot?.documentChanges?.any {
+                        it.type != com.google.firebase.firestore.DocumentChange.Type.REMOVED
+                    } == true) {
+                        androidx.work.WorkManager.getInstance(this).enqueueUniqueWork(
+                            "receiver-foreground-sync",
+                            androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE,
+                            androidx.work.OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
+                        )
+                    }
+                }
+        }
+    }
+
+    override fun onStop() {
+        queueListener?.remove()
+        queueListener = null
+        liveDataJob?.cancel()
+        liveDataJob = null
+        super.onStop()
     }
 
     /**
@@ -353,7 +389,8 @@ class LocationTimelineActivity : AppCompatActivity() {
             .setPositiveButton("Close", null)
             .show()
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener { placeUi.showActions(point) }
-        placeUi.bindName(dialog, point) { name -> dialog.setMessage("$details\n$name") }
+        TimelineMaps.bindMessage(dialog, "$details\n${placeUi.immediateName(point)}", point)
+        placeUi.bindName(dialog, point) { name -> TimelineMaps.bindMessage(dialog, "$details\n$name", point) }
     }
 
     private fun addRouteLine(points: List<LatLong>) {
