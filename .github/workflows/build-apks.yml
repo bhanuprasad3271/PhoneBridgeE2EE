@@ -70,6 +70,8 @@ jobs:
           api-level: 30
           arch: x86_64
           target: google_apis
+          # Bound disposable test data; the default partition exhausted runner disk.
+          disk-size: 2048M
           disable-animations: true
           script: |
             gradle :shared:connectedDebugAndroidTest :collector:assembleFullDebug :collector:assembleLiteDebug :collector:assembleFullDebugAndroidTest :collector:assembleLiteDebugAndroidTest :receiver:assembleDebug --stacktrace
