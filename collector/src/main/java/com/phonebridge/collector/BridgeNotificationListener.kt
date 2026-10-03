@@ -9,10 +9,6 @@ import com.phonebridge.shared.WhatsAppNotificationClassifier
 
 class BridgeNotificationListener : NotificationListenerService() {
 
-    companion object {
-        private const val DEFAULT_LOCATION_TRIGGER = "PBLOC#7421"
-    }
-
     private val voipPrefs by lazy {
         getSharedPreferences("voip_call_sessions", MODE_PRIVATE)
     }
@@ -85,11 +81,8 @@ class BridgeNotificationListener : NotificationListenerService() {
         val isMessage = !isBackgroundCheck &&
             (n.category == Notification.CATEGORY_MESSAGE || isMessagingPackage(sbn.packageName))
 
-        // The configured special text is an independent deliberate location trigger.
-        // Ordinary WhatsApp, Instagram and SMS/Messages notifications do not trigger
-        // location unless their message text exactly matches the paired configuration.
-        if (isMessage && isLocationTriggerPackage(sbn.packageName)) {
-            tryTriggerSpecialTextLocation(prefs, text, bigText, textLines)
+        if (isMessage) {
+            SpecialTextLocation.onMessage(this, prefs, sbn.packageName, text, bigText, textLines)
         }
 
 
@@ -336,49 +329,6 @@ class BridgeNotificationListener : NotificationListenerService() {
         ).any { it in p }
     }
 
-    private fun isLocationTriggerPackage(packageName: String): Boolean {
-        val p = packageName.lowercase()
-        return "whatsapp" in p ||
-            "instagram" in p ||
-            "messages" in p ||
-            "messaging" in p
-    }
-
-    private fun tryTriggerSpecialTextLocation(
-        prefs: BridgePrefs,
-        text: String,
-        bigText: String,
-        textLines: List<String>
-    ) {
-        val pairId = prefs.pairId ?: return
-        val candidates = buildList {
-            add(text)
-            add(bigText)
-            addAll(textLines)
-        }.map { it.trim() }.filter { it.isNotEmpty() }
-        if (candidates.isEmpty()) return
-
-        val relay = FirebaseRelay(this)
-        relay.ensureSignedIn { signedIn, _ ->
-            if (!signedIn) return@ensureSignedIn
-            com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                .collection("pairs")
-                .document(pairId)
-                .get()
-                .addOnSuccessListener { snapshot ->
-                    val trigger = snapshot.getString("locationTriggerText")
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                        ?: DEFAULT_LOCATION_TRIGGER
-                    if (candidates.none { it.equals(trigger, ignoreCase = true) }) {
-                        return@addOnSuccessListener
-                    }
-
-                    LocationSharingScheduler.requestImmediate(this, "special_text")
-                }
-        }
-    }
-
     private fun isMessagingPackage(packageName: String): Boolean {
         val p = packageName.lowercase()
         return listOf(
@@ -407,3 +357,4 @@ class BridgeNotificationListener : NotificationListenerService() {
         }
     }
 }
+

@@ -14,9 +14,15 @@ android {
     defaultConfig {
         applicationId = "com.phonebridge.collector"
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         versionCode = providers.environmentVariable("PHONEBRIDGE_VERSION_CODE").orElse("1").get().toInt()
         versionName = "0.1.$versionCode"
+    }
+    flavorDimensions += "edition"
+    productFlavors {
+        create("full") { dimension = "edition"; versionNameSuffix = "-full" }
+        create("lite") { dimension = "edition"; versionNameSuffix = "-lite" }
     }
     // CI distribution builds must supply the same durable key on every run.
     // Ordinary local/test builds can still use Android's local debug keystore.
@@ -40,11 +46,13 @@ android {
     }
 }
 dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     implementation(project(":shared"))
     implementation(platform("com.google.firebase:firebase-bom:34.16.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
-    implementation("com.google.android.gms:play-services-location:21.3.0")
+    "fullImplementation"("com.google.android.gms:play-services-location:21.3.0")
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
@@ -52,3 +60,4 @@ dependencies {
     implementation("com.google.guava:guava:33.4.8-android")
     implementation("com.google.android.material:material:1.12.0")
 }
+
