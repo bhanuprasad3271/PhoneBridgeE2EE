@@ -7,6 +7,11 @@ plugins {
 android {
     namespace = "com.phonebridge.receiver"
     compileSdk = 36
+    lint {
+        if (providers.gradleProperty("compatibilityLint").isPresent) {
+            checkOnly += setOf("NewApi", "InlinedApi")
+        }
+    }
     defaultConfig {
         applicationId = "com.phonebridge.receiver"
         minSdk = 26
