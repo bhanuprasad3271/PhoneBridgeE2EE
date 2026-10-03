@@ -311,3 +311,4 @@ class LocationSharingService : Service() {
             )
             .build()
 }
+

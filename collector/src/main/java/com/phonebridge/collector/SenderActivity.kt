@@ -4,8 +4,6 @@ import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
@@ -14,7 +12,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -22,14 +19,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import com.phonebridge.shared.PlainRecord
 
-class MainActivity : AppCompatActivity() {
+abstract class SenderActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var dashboardStatus: TextView
-    private lateinit var locationSharingStatus: TextView
-    private lateinit var locationSharingButton: Button
     private lateinit var pairingScreen: View
     private lateinit var dashboardScreen: View
-    private lateinit var prefs: BridgePrefs
+    protected lateinit var prefs: BridgePrefs
 
     private val callPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -49,30 +44,6 @@ class MainActivity : AppCompatActivity() {
         reportSenderState(force = true)
     }
 
-    private val locationPermissions = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { result ->
-        val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
-            result[Manifest.permission.ACCESS_COARSE_LOCATION] == true ||
-            LocationSharingScheduler.hasForegroundLocation(this)
-
-        if (!granted) {
-            prefs.locationSharingEnabled = false
-            LocationSharingScheduler.cancel(this)
-            updateLocationSharingUi()
-            return@registerForActivityResult
-        }
-
-        prefs.locationSharingEnabled = true
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            !LocationSharingScheduler.hasBackgroundLocation(this)
-        ) {
-            showBackgroundLocationInstructions()
-        } else {
-            activateLocationSharing()
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -81,9 +52,8 @@ class MainActivity : AppCompatActivity() {
         dashboardScreen = findViewById(R.id.dashboardScreen)
         status = findViewById(R.id.status)
         dashboardStatus = findViewById(R.id.dashboardStatus)
-        locationSharingStatus = findViewById(R.id.locationSharingStatus)
-        locationSharingButton = findViewById(R.id.btnLocationSharing)
         prefs = BridgePrefs(this)
+        bindEditionUi()
 
         if (prefs.pairId != null && prefs.receiverPublicKey != null) {
             if (prefs.pairedAtMs == 0L) {
@@ -133,7 +103,7 @@ class MainActivity : AppCompatActivity() {
                                 showDashboard()
                                 try {
                                     NotificationListenerService.requestRebind(
-                                        ComponentName(this@MainActivity, BridgeNotificationListener::class.java)
+                                        ComponentName(this@SenderActivity, BridgeNotificationListener::class.java)
                                     )
                                 } catch (_: SecurityException) {
                                     dashboardStatus.text = "Paired · enable notification access to sync notifications"
@@ -162,34 +132,6 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        locationSharingButton.setOnClickListener {
-            when {
-                prefs.locationSharingEnabled &&
-                    LocationSharingScheduler.hasBackgroundLocation(this) -> {
-                    AlertDialog.Builder(this)
-                        .setTitle("Stop location sharing?")
-                        .setMessage("PhoneBridge will stop the location service and stop sending location updates.")
-                        .setNegativeButton("Cancel", null)
-                        .setPositiveButton("Stop sharing") { _, _ ->
-                            prefs.locationSharingEnabled = false
-                            LocationSharingScheduler.cancel(this)
-                            updateLocationSharingUi()
-                            reportSenderState(force = true)
-                        }
-                        .show()
-                }
-
-                prefs.locationSharingEnabled &&
-                    LocationSharingScheduler.hasForegroundLocation(this) -> {
-                    showBackgroundLocationInstructions()
-                }
-
-                else -> {
-                    startLocationSharingSetup()
-                }
-            }
-        }
-
         findViewById<Button>(R.id.btnSync).setOnClickListener {
             WorkManager.getInstance(this).enqueue(OneTimeWorkRequestBuilder<CallLogWorker>().build())
             dashboardStatus.text = "Optional sync requested · automatic sync remains enabled"
@@ -199,97 +141,23 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (::prefs.isInitialized && prefs.pairId != null && prefs.receiverPublicKey != null) {
-            updateLocationSharingUi()
+            updateEditionUi()
             reportSenderState(force = false)
         }
     }
 
-    private fun startLocationSharingSetup() {
-        AlertDialog.Builder(this)
-            .setTitle("Enable Location Sharing")
-            .setMessage(
-                "PhoneBridge Sender will use Android background work for occasional location sharing after this app is closed. " +
-                    "It will request an encrypted location about every 15 minutes when Android allows background work. " +
-                    "Updates are best-effort and can be delayed by Android battery/Doze restrictions; no continuous location foreground service is kept running."
-            )
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Continue") { _, _ ->
-                val permissions = mutableListOf(
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                )
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    permissions.add(Manifest.permission.POST_NOTIFICATIONS)
-                }
-                locationPermissions.launch(permissions.toTypedArray())
-            }
-            .show()
-    }
+    protected open fun bindEditionUi() {}
+    protected open fun updateEditionUi() {}
+    protected abstract fun locationState(): String
+    protected abstract fun stopLocationSharing()
 
-    private fun showBackgroundLocationInstructions() {
-        AlertDialog.Builder(this)
-            .setTitle("Allow background location")
-            .setMessage(
-                "For occasional sharing after Sender is closed, Android requires 'Allow all the time'. " +
-                    "On the next screen open Permissions > Location and choose Allow all the time, then return to PhoneBridge."
-            )
-            .setNegativeButton("Not now") { _, _ -> updateLocationSharingUi() }
-            .setPositiveButton("Open app settings") { _, _ ->
-                startActivity(
-                    Intent(
-                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-                        Uri.parse("package:$packageName")
-                    )
-                )
-            }
-            .show()
-    }
-
-    private fun activateLocationSharing() {
-        if (!prefs.locationSharingEnabled) return
-        if (!LocationSharingScheduler.hasBackgroundLocation(this)) {
-            updateLocationSharingUi()
-            return
-        }
-        LocationSharingScheduler.schedule(this)
-        updateLocationSharingUi()
-        reportSenderState(force = true)
-    }
-
-    private fun updateLocationSharingUi() {
-        if (!::locationSharingStatus.isInitialized || !::locationSharingButton.isInitialized) return
-
-        val enabled = prefs.locationSharingEnabled
-        val backgroundGranted = LocationSharingScheduler.hasBackgroundLocation(this)
-
-        when {
-            !enabled -> {
-                locationSharingStatus.text = "Location sharing is off"
-                locationSharingButton.text = "Enable Location Sharing"
-            }
-            backgroundGranted -> {
-                locationSharingStatus.text = "Occasional location sharing active · Android schedules ~15-minute background checks · updates may be delayed"
-                locationSharingButton.text = "Stop Location Sharing"
-                LocationSharingScheduler.schedule(this)
-            }
-            else -> {
-                locationSharingStatus.text = "Setup incomplete · grant Location > Allow all the time"
-                locationSharingButton.text = "Finish Location Setup"
-            }
-        }
-    }
-
-    private fun reportSenderState(force: Boolean) {
+    protected fun reportSenderState(force: Boolean) {
         if (prefs.pairId == null || prefs.receiverPublicKey == null) return
 
         val callGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
         val notifGranted = packageName in NotificationManagerCompat.getEnabledListenerPackages(this)
-        val locationState = when {
-            prefs.locationSharingEnabled && LocationSharingScheduler.hasBackgroundLocation(this) -> "enabled"
-            prefs.locationSharingEnabled -> "needs_permission"
-            else -> "off"
-        }
+        val locationState = locationState()
         val version = try {
             packageManager.getPackageInfo(packageName, 0).versionName ?: "unknown"
         } catch (_: Exception) {
@@ -337,11 +205,13 @@ class MainActivity : AppCompatActivity() {
                         timestamp = System.currentTimeMillis(),
                         source = "sender",
                         title = when (locationState) {
+                            "unsupported" -> "Location unavailable — Sender Lite"
                             "enabled" -> "Location sharing active"
                             "needs_permission" -> "Location sharing setup incomplete"
                             else -> "Location sharing off"
                         },
                         body = when (locationState) {
+                            "unsupported" -> "Sender Lite does not collect location. Messages, calls and notifications remain available. Use Full Sender for location sharing."
                             "enabled" -> "PhoneBridge can send encrypted background location updates to this Receiver."
                             "needs_permission" -> "Background location permission is still required on Phone 2."
                             else -> "PhoneBridge is not collecting background location."
@@ -366,6 +236,8 @@ class MainActivity : AppCompatActivity() {
                         body = "Sender version $version is connected.",
                         metadata = mapOf(
                             "appVersion" to version,
+                            "senderEdition" to getString(R.string.sender_edition),
+                            "supportsLocation" to (locationState != "unsupported").toString(),
                             "callSync" to callState,
                             "notificationAccess" to notifState,
                             "locationSharing" to locationState
@@ -378,7 +250,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearPendingPair() {
-        LocationSharingScheduler.cancel(this)
+        stopLocationSharing()
         prefs.locationSharingEnabled = false
         prefs.pairId = null
         prefs.receiverPublicKey = null
@@ -402,6 +274,7 @@ class MainActivity : AppCompatActivity() {
     private fun showDashboard() {
         pairingScreen.visibility = View.GONE
         dashboardScreen.visibility = View.VISIBLE
-        updateLocationSharingUi()
+        updateEditionUi()
     }
 }
+

@@ -115,3 +115,4 @@ object LocationSharingScheduler {
         context.stopService(android.content.Intent(context, LocationSharingService::class.java))
     }
 }
+

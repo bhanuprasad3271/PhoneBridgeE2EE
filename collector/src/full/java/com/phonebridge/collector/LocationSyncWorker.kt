@@ -255,3 +255,4 @@ class LocationSyncWorker(
             addOnCanceledListener { if (cont.isActive) cont.resume(null) }
         }
 }
+
