@@ -8,8 +8,7 @@ import java.security.spec.X509EncodedKeySpec
 import javax.crypto.*
 import javax.crypto.spec.*
 class CryptoBox(private val context:Context,private val alias:String){
- private val ks=KeyStore.getInstance("AndroidKeyStore").apply{load(null)}
- fun ensureKeyPair():KeyPair{if(!ks.containsAlias(alias)){val g=KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC,"AndroidKeyStore");g.initialize(KeyGenParameterSpec.Builder(alias,KeyProperties.PURPOSE_AGREE_KEY).setAlgorithmParameterSpec(java.security.spec.ECGenParameterSpec("secp256r1")).setDigests(KeyProperties.DIGEST_SHA256).build());g.generateKeyPair()};return KeyPair(ks.getCertificate(alias).publicKey,ks.getKey(alias,null) as PrivateKey)}
+ fun ensureKeyPair():KeyPair = CompatibleKeyStore(context, alias).getOrCreate()
  fun publicKeyB64()=Base64.encodeToString(ensureKeyPair().public.encoded,Base64.NO_WRAP)
  private fun pub(s:String)=KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.decode(s,Base64.NO_WRAP)))
  fun deriveAesKey(peer:String,pairId:String):ByteArray{val k=ensureKeyPair();val a=KeyAgreement.getInstance("ECDH");a.init(k.private);a.doPhase(pub(peer),true);val shared=a.generateSecret();val salt=MessageDigest.getInstance("SHA-256").digest("PhoneBridge|$pairId".toByteArray());return hkdf(shared,salt,"PhoneBridge-AES-GCM-v1".toByteArray(),32)}

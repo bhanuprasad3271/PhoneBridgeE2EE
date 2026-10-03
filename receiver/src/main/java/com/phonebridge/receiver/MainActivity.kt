@@ -497,11 +497,18 @@ class MainActivity : AppCompatActivity() {
 
     private fun createPairCodeAttempt(remainingAttempts: Int) {
         val uid = auth.currentUser?.uid ?: return
+        val publicKey = try {
+            crypto.publicKeyB64()
+        } catch (_: Exception) {
+            pairCodeText.text = "------"
+            status.text = "Could not access the secure pairing key. Restart the phone and try again; do not clear app data."
+            return
+        }
         val code = (SecureRandom().nextInt(900000) + 100000).toString()
         val now = System.currentTimeMillis()
         val pairDoc = mapOf(
             "receiverUid" to uid,
-            "receiverPublicKeyB64" to crypto.publicKeyB64(),
+            "receiverPublicKeyB64" to publicKey,
             "collectorUid" to null,
             "collectorPublicKeyB64" to null,
             "createdAtMs" to now,

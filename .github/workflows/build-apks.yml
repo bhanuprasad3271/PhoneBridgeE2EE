@@ -55,6 +55,35 @@ jobs:
       - name: Test Receiver timeline logic
         run: gradle :receiver:testDebugUnitTest --stacktrace
 
+      - name: Check Android API compatibility in both apps
+        run: gradle :shared:lintDebug :collector:lintDebug :receiver:lintDebug -PcompatibilityLint --stacktrace
+
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Test Android 11 encryption and app startup
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: |
+            gradle :shared:connectedDebugAndroidTest :collector:assembleDebug :receiver:assembleDebug --stacktrace
+            adb shell svc wifi disable
+            adb shell svc data disable
+            adb install -r collector/build/outputs/apk/debug/collector-debug.apk
+            adb install -r receiver/build/outputs/apk/debug/receiver-debug.apk
+            adb shell am start -W -n com.phonebridge.collector/.MainActivity
+            sleep 3
+            adb shell pidof com.phonebridge.collector
+            adb shell am start -W -n com.phonebridge.receiver/.MainActivity
+            sleep 3
+            adb shell pidof com.phonebridge.receiver
+
       - name: Test signing safeguards with a disposable key
         run: python3 -m unittest discover -s scripts -p 'test_apk_signing.py' -v
 

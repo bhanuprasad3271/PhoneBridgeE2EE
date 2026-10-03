@@ -25,9 +25,15 @@ class FirebaseRelay(private val activityOrService: android.content.Context) {
         val pairId = prefs.pairId ?: return done(false, "No pairing code")
         val uid = auth.currentUser?.uid ?: return done(false, "Not authenticated")
         val pairRef = db.collection("pairs").document(pairId)
+        val publicKey = try {
+            crypto.publicKeyB64()
+        } catch (_: Exception) {
+            done(false, "Could not access the secure pairing key. Restart the phone and try again; do not clear app data.")
+            return
+        }
         val data = mapOf(
             "collectorUid" to uid,
-            "collectorPublicKeyB64" to crypto.publicKeyB64(),
+            "collectorPublicKeyB64" to publicKey,
             "collectorPairedAt" to FieldValue.serverTimestamp()
         )
 

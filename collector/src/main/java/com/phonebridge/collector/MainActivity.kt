@@ -131,9 +131,13 @@ class MainActivity : AppCompatActivity() {
                                 status.text = "Paired successfully"
                                 dashboardStatus.text = "Connected to Phone 1 · New activity only"
                                 showDashboard()
-                                NotificationListenerService.requestRebind(
-                                    ComponentName(this@MainActivity, BridgeNotificationListener::class.java)
-                                )
+                                try {
+                                    NotificationListenerService.requestRebind(
+                                        ComponentName(this@MainActivity, BridgeNotificationListener::class.java)
+                                    )
+                                } catch (_: SecurityException) {
+                                    dashboardStatus.text = "Paired · enable notification access to sync notifications"
+                                }
                                 reportSenderState(force = true)
                             } else {
                                 clearPendingPair()
