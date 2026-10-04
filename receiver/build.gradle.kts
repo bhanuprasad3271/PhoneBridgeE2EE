@@ -15,6 +15,7 @@ android {
     defaultConfig {
         applicationId = "com.phonebridge.receiver"
         minSdk = 26
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         targetSdk = 36
         versionCode = providers.environmentVariable("PHONEBRIDGE_VERSION_CODE").orElse("1").get().toInt()
         versionName = "0.1.$versionCode"
@@ -41,6 +42,8 @@ android {
     }
 }
 dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     implementation(project(":shared"))
     implementation(platform("com.google.firebase:firebase-bom:34.16.0"))
     implementation("com.google.firebase:firebase-auth")

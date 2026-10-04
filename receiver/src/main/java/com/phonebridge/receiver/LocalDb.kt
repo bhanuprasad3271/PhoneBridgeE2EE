@@ -12,11 +12,18 @@ data class RecordEntity(
     val source: String,
     val title: String,
     val body: String,
-    val metadataJson: String
+    val metadataJson: String,
+    @ColumnInfo(defaultValue = "''") val pairId: String = ""
 )
 
 @Dao
 interface RecordDao {
+    @Query("SELECT * FROM records WHERE pairId = :pairId ORDER BY timestamp DESC")
+    suspend fun forPair(pairId: String): List<RecordEntity>
+
+    @Query("DELETE FROM records WHERE pairId = :pairId AND type = 'alert'")
+    suspend fun clearAlerts(pairId: String)
+
     @Query("SELECT * FROM records ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<RecordEntity>>
 
@@ -35,22 +42,28 @@ interface RecordDao {
     @Query("DELETE FROM records WHERE type = :type")
     suspend fun deleteByType(type: String)
 
-    @Query("SELECT * FROM records WHERE type = 'location' AND timestamp >= :fromMs AND timestamp <= :toMs ORDER BY timestamp ASC")
-    suspend fun locationsBetween(fromMs: Long, toMs: Long): List<RecordEntity>
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type = 'location' AND timestamp >= :fromMs AND timestamp <= :toMs ORDER BY timestamp ASC")
+    suspend fun locationsBetween(fromMs: Long, toMs: Long, pairId: String): List<RecordEntity>
 
     @Query("DELETE FROM records WHERE type = 'location' AND timestamp < :cutoffMs")
     suspend fun deleteLocationsOlderThan(cutoffMs: Long)
 }
 
-@Database(entities = [RecordEntity::class], version = 1)
+@Database(entities = [RecordEntity::class], version = 2, exportSchema = false)
 abstract class LocalDb : RoomDatabase() {
     abstract fun dao(): RecordDao
 
     companion object {
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE records ADD COLUMN pairId TEXT NOT NULL DEFAULT ''")
+            }
+        }
         @Volatile private var instance: LocalDb? = null
 
         fun get(context: Context): LocalDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, LocalDb::class.java, "phonebridge.db")
+                .addMigrations(MIGRATION_1_2)
                 .build().also { instance = it }
         }
     }

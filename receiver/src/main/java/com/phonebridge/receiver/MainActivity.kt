@@ -55,6 +55,12 @@ class MainActivity : AppCompatActivity() {
         LocalDb.get(this)
     }
     private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
+    private val devices by lazy { DeviceProfiles(this) }
+    private lateinit var deviceButton: Button
+    private lateinit var deviceStatusPanel: LinearLayout
+    private val statusValues = linkedMapOf<String, TextView>()
+    private val queueListeners = mutableMapOf<String, ListenerRegistration>()
+    private val deviceFilters = mutableMapOf<String, Map<String, FilterCriteria>>()
 
     private lateinit var adapter: RecordAdapter
     private lateinit var locationHistoryAdapter: RecordAdapter
@@ -120,6 +126,19 @@ class MainActivity : AppCompatActivity() {
         alertsToolbar = findViewById(R.id.alertsToolbar)
         status = findViewById(R.id.status)
         dashboardStatus = findViewById(R.id.dashboardStatus)
+        devices.all() // Migrate the existing pairing without changing its key.
+        deviceButton = findViewById(R.id.btnDevices)
+        deviceButton.setOnClickListener { showDevices() }
+        findViewById<Button>(R.id.btnPairingDevices).setOnClickListener { showDevices() }
+        deviceStatusPanel = findViewById(R.id.deviceStatusPanel)
+        for (label in listOf("Sender app", "Notifications", "Call access", "Location", "Last connected", "App version", "GitHub build")) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(8, 8, 8, 8) }
+            row.addView(TextView(this).apply { text = label; setTextColor(0xFFCBD5E1.toInt()); textSize = 14f }, LinearLayout.LayoutParams(0, -2, 1f))
+            val value = TextView(this).apply { text = "Unknown"; textSize = 14f; gravity = android.view.Gravity.END; setTextColor(0xFFCBD5E1.toInt()) }
+            row.addView(value, LinearLayout.LayoutParams(0, -2, 1.2f))
+            statusValues[label] = value
+            deviceStatusPanel.addView(row)
+        }
         pairCodeText = findViewById(R.id.pairCode)
         listTitle = findViewById(R.id.listTitle)
         alertsButton = findViewById(R.id.btnAlertsTab)
@@ -182,14 +201,14 @@ class MainActivity : AppCompatActivity() {
         locationTriggerButton.setOnClickListener { showLocationTriggerEditor() }
         openMapsButton.setOnClickListener { openLatestLocationInMaps() }
         locationTimelineButton.setOnClickListener {
-            startActivity(Intent(this, LocationTimelineActivity::class.java))
+            startActivity(Intent(this, LocationTimelineActivity::class.java).putExtra("devicePairId", devices.activeId().orEmpty()))
         }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
+            val selectedPairId = devices.activeId().orEmpty()
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) {
-                    db.dao().deleteByType("alert")
-                    db.dao().deleteByType("status")
+                    db.dao().clearAlerts(selectedPairId)
                 }
                 refreshLocal()
             }
@@ -233,6 +252,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onStop() {
+        stopQueueListeners()
         liveDataJob?.cancel()
         liveDataJob = null
         queueRegistration?.remove()
@@ -247,6 +267,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        stopQueueListeners()
         monitoring.close()
         recentAddressJob?.cancel()
         queueRegistration?.remove()
@@ -266,6 +287,7 @@ class MainActivity : AppCompatActivity() {
         val isLocation = filter == "location"
 
         alertsToolbar.visibility = if (filter == "alert") View.VISIBLE else View.GONE
+        deviceStatusPanel.visibility = if (filter == "alert") View.VISIBLE else View.GONE
         filterButton.visibility = if (filter == "alert" || isLocation) View.GONE else View.VISIBLE
         locationRefreshButton.visibility = if (isLocation) View.VISIBLE else View.GONE
         locationTriggerButton.visibility = if (isLocation) View.VISIBLE else View.GONE
@@ -291,8 +313,12 @@ class MainActivity : AppCompatActivity() {
             menu.add(0, 1, 0, "Pair another phone")
             menu.add(0, 2, 1, "Reset pairing")
             menu.add(0, 3, 2, "Remove pairing")
+            menu.add(0, 4, 3, "Switch / manage devices")
+            menu.add(0, 5, 4, "Name this device")
             setOnMenuItemClickListener { item ->
                 when (item.itemId) {
+                    4 -> { showDevices(); true }
+                    5 -> { renameDevice(); true }
                     1 -> {
                         confirmPairAnother()
                         true
@@ -309,6 +335,79 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             show()
+        }
+    }
+
+    private fun showDevices() {
+        val profiles = devices.all()
+        val names = profiles.map { it.name + when { it.archived -> " · archived"; !it.paired -> " · awaiting pairing"; else -> "" } + if (it.pairId == devices.activeId()) " ✓" else "" }
+        AlertDialog.Builder(this).setTitle("Switch / manage devices")
+            .setItems((names + "Earlier records" + "＋ Pair another phone").toTypedArray()) { _, index ->
+                when {
+                    index < profiles.size -> switchDevice(profiles[index].pairId)
+                    index == profiles.size -> switchDevice("")
+                    else -> confirmPairAnother()
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun switchDevice(pairId: String) {
+        deviceFilters[devices.activeId().orEmpty()] = sectionFilters.toMap()
+        devices.select(pairId)
+        sectionFilters.clear()
+        sectionFilters.putAll(deviceFilters[pairId].orEmpty())
+        pairRegistration?.remove()
+        pairRegistration = null
+        recentAddressJob?.cancel()
+        cachedRows = emptyList()
+        latestLocation = null
+        activeLocationRefreshRequestId = null
+        locationRefreshStage = 0
+        locationRefreshButton.isEnabled = true
+        locationRefreshProgress.text = "Ready · request a fresh location"
+        locationDisplayNames.reloadSavedNames()
+        monitoring.deviceChanged()
+        adapter.submit(emptyList())
+        locationHistoryAdapter.submit(emptyList())
+        renderDeviceStatus()
+        updateFilterButton()
+        if (auth.currentUser != null) listen(pairId) else showDashboard()
+        recordDates.select(currentFilter)
+        lifecycleScope.launch { refreshLocal() }
+    }
+
+    private fun renameDevice() {
+        val id = devices.activeId()?.takeIf { it.isNotBlank() } ?: return
+        val profile = devices.all().firstOrNull { it.pairId == id } ?: return
+        val input = EditText(this).apply { setText(profile.name); filters = arrayOf(android.text.InputFilter.LengthFilter(60)) }
+        val dialog = AlertDialog.Builder(this).setTitle("Name this device").setView(input)
+            .setNegativeButton("Cancel", null).setPositiveButton("Save", null).create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val name = input.text.toString().trim()
+                if (name.isBlank()) { input.error = "Enter a name"; return@setOnClickListener }
+                devices.rename(id, name)
+                if (devices.activeId() == id) {
+                    deviceButton.text = "${devices.activeName()} ▾ · ${devices.all().count { !it.archived }} devices"
+                    dashboardStatus.text = devices.activeName() + if (profile.archived) " · stored records" else " · paired"
+                }
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun renderDeviceStatus() {
+        val state = if (devices.activeId().isNullOrEmpty()) DeviceStatus() else DeviceStatus.from(cachedRows)
+        val time = if (state.lastConnected > 0) SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(state.lastConnected)) else "Not received yet"
+        val values = listOf(state.edition, state.notifications, state.calls, state.location, time, state.version, state.build)
+        statusValues.values.zip(values).forEach { (view, value) ->
+            view.text = value
+            view.setTextColor(when (value) {
+                "Enabled" -> 0xFF86EFAC.toInt()
+                "Disabled", "Permission needed" -> 0xFFFCA5A5.toInt()
+                else -> 0xFFCBD5E1.toInt()
+            })
         }
     }
 
@@ -450,13 +549,10 @@ class MainActivity : AppCompatActivity() {
     private fun confirmPairAnother() {
         AlertDialog.Builder(this)
             .setTitle("Pair another phone?")
-            .setMessage("The current Sender pairing will be removed and a new 6-digit code will be generated.")
+            .setMessage("Add a Sender without removing existing devices or their records. You can switch back at any time.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Continue") { _, _ ->
-                disconnectCurrentPair {
-                    showPairing()
-                    createPairCode()
-                }
+                createPairCode()
             }
             .show()
     }
@@ -464,7 +560,7 @@ class MainActivity : AppCompatActivity() {
     private fun confirmResetPairing() {
         AlertDialog.Builder(this)
             .setTitle("Reset pairing?")
-            .setMessage("This clears the current pairing and returns to the pairing screen.")
+            .setMessage("Disconnect only ${devices.activeName()}. Its stored records and other devices are kept. A new pairing creates a separate profile.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Reset") { _, _ ->
                 disconnectCurrentPair {
@@ -479,7 +575,7 @@ class MainActivity : AppCompatActivity() {
     private fun confirmRemovePairing() {
         AlertDialog.Builder(this)
             .setTitle("Remove pairing?")
-            .setMessage("The Sender will no longer be connected. Records already stored on this receiver remain available.")
+            .setMessage("Disconnect only ${devices.activeName()}. Keep its profile as an archive, keep all stored records, and leave other devices connected.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Remove") { _, _ ->
                 disconnectCurrentPair {
@@ -520,7 +616,8 @@ class MainActivity : AppCompatActivity() {
         status.text = "Creating secure pairing code..."
         fs.collection("pairs").document(code).set(pairDoc)
             .addOnSuccessListener {
-                prefs.edit().putString("pairId", code).apply()
+                devices.add(code)
+                switchDevice(code)
                 pairCodeText.text = code
                 status.text = "Enter this 6-digit code on the Sender. It will stay here until pairing succeeds."
                 listen(code)
@@ -548,21 +645,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun listen(pairId: String) {
+        startQueueListener()
         pairRegistration?.remove()
         queueRegistration?.remove()
         queueRegistration = null
 
+        val profile = devices.all().firstOrNull { it.pairId == pairId }
+        if (pairId.isEmpty() || profile?.archived == true) {
+            showDashboard()
+            dashboardStatus.text = devices.activeName() + " · stored records"
+            return
+        }
+
         val pairRef = fs.collection("pairs").document(pairId)
         pairRegistration = pairRef.addSnapshotListener { pairSnap, err ->
+            if (devices.activeId() != pairId) return@addSnapshotListener
             if (err != null) {
                 status.text = "Connection error: " + err.message
                 return@addSnapshotListener
             }
             if (pairSnap == null || !pairSnap.exists()) {
-                prefs.edit().remove("pairId").apply()
-                pairCodeText.text = "------"
-                status.text = "Pairing is no longer active. Generate a new code."
-                showPairing()
+                if (pairSnap?.metadata?.isFromCache == true) return@addSnapshotListener
+                devices.archive(pairId)
+                queueListeners.remove(pairId)?.remove()
+                showDashboard()
+                dashboardStatus.text = devices.activeName() + " · pairing unavailable (records kept)"
                 return@addSnapshotListener
             }
 
@@ -584,8 +691,11 @@ class MainActivity : AppCompatActivity() {
                 return@addSnapshotListener
             }
 
+            val wasPaired = devices.all().firstOrNull { it.pairId == pairId }?.paired == true
+            devices.markPaired(pairId)
             showDashboard()
-            dashboardStatus.text = "Connected to Sender"
+            dashboardStatus.text = devices.activeName() + " · paired"
+            if (!wasPaired) renameDevice()
         }
     }
 
@@ -596,15 +706,20 @@ class MainActivity : AppCompatActivity() {
         queueRegistration?.remove()
         queueRegistration = null
         fun finish() {
-            prefs.edit().remove("pairId").apply()
+            if (pairId != null && pairId.isNotBlank()) devices.archive(pairId)
+            queueListeners.remove(pairId)?.remove()
             after()
         }
 
-        if (pairId == null) {
+        if (pairId.isNullOrBlank()) {
             finish()
         } else {
             fs.collection("pairs").document(pairId).delete()
-                .addOnCompleteListener { finish() }
+                .addOnSuccessListener { finish() }
+                .addOnFailureListener { error ->
+                    AlertDialog.Builder(this).setTitle("Could not disconnect").setMessage(error.message).setPositiveButton("OK", null).show()
+                    listen(pairId)
+                }
         }
     }
 
@@ -618,6 +733,7 @@ class MainActivity : AppCompatActivity() {
     private fun showDashboard() {
         pairingScreen.visibility = View.GONE
         dashboardScreen.visibility = View.VISIBLE
+        deviceButton.text = "${devices.activeName()} ▾ · ${devices.all().count { !it.archived }} devices"
 
         enqueueReceiverSync()
         startQueueListener()
@@ -627,6 +743,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showLocationTriggerEditor() {
         val pairId = prefs.getString("pairId", null) ?: return
+        if (!canRequestLocation(pairId)) return
         val input = EditText(this).apply {
             setText(locationTriggerButton.text.toString())
             setSelection(text.length)
@@ -665,6 +782,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun requestFreshLocationManually() {
         val pairId = prefs.getString("pairId", null) ?: return
+        if (!canRequestLocation(pairId)) return
         if (activeLocationRefreshRequestId != null) return
 
         val requestId = UUID.randomUUID().toString()
@@ -742,15 +860,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startQueueListener() {
-        if (queueRegistration != null) return
-        val pairId = prefs.getString("pairId", null) ?: return
-
-        queueRegistration = fs.collection("pairs")
+        for (device in devices.all().filter { !it.archived }) {
+        val pairId = device.pairId
+        if (queueListeners.containsKey(pairId)) continue
+        queueListeners[pairId] = fs.collection("pairs")
             .document(pairId)
             .collection("queue")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    dashboardStatus.text = "Connected to Sender • waiting to reconnect"
+                    if (devices.activeId() == pairId) dashboardStatus.text = devices.activeName() + " · waiting to reconnect"
                     return@addSnapshotListener
                 }
 
@@ -758,8 +876,29 @@ class MainActivity : AppCompatActivity() {
                     it.type == DocumentChange.Type.ADDED || it.type == DocumentChange.Type.MODIFIED
                 } == true
 
-                if (hasNewData) enqueueReceiverSync()
+                if (hasNewData) WorkManager.getInstance(this).enqueueUniqueWork(
+                    "receiver-foreground-sync-$pairId", ExistingWorkPolicy.APPEND_OR_REPLACE,
+                    OneTimeWorkRequestBuilder<ReceiverSyncWorker>()
+                        .setInputData(androidx.work.workDataOf(ReceiverSyncWorker.KEY_PAIR_ID to pairId)).build())
             }
+        }
+    }
+
+    private fun stopQueueListeners() {
+        queueListeners.values.forEach { it.remove() }
+        queueListeners.clear()
+    }
+
+    private fun canRequestLocation(pairId: String): Boolean {
+        val unavailable = pairId.isBlank() || devices.all().firstOrNull { it.pairId == pairId }?.archived == true
+        val lite = DeviceStatus.from(cachedRows).edition == "Lite"
+        if (unavailable || lite) {
+            AlertDialog.Builder(this).setTitle("Location unavailable")
+                .setMessage(if (lite) "Sender Lite does not share location." else "This profile contains stored records and has no active pairing.")
+                .setPositiveButton("OK", null).show()
+            return false
+        }
+        return true
     }
 
     private fun applyFilter() {
@@ -771,13 +910,13 @@ class MainActivity : AppCompatActivity() {
             "message" -> cachedRows.filter { it.type == "message" && !isWhatsAppBackgroundCheck(it) }
             "wp_call" -> cachedRows.filter { it.type == "wp_call" }
             "location" -> emptyList()
-            "alert" -> cachedRows.filter { it.type == "alert" || it.type == "status" }
+            "alert" -> DeviceStatus.warnings(cachedRows)
             else -> cachedRows
         }
 
         val criteria = sectionFilters[currentFilter]
         recordDates.customRange(criteria?.fromMs, criteria?.toMs)
-        val datedRows = if (criteria?.fromMs != null || criteria?.toMs != null) baseRows
+        val datedRows = if (currentFilter == "alert" || criteria?.fromMs != null || criteria?.toMs != null) baseRows
             else baseRows.filter { recordDates.matches(it) }
         adapter.submit(
             if (criteria == null || !criteria.isActive()) datedRows
@@ -799,7 +938,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun refreshLocal() {
-        cachedRows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().all()) }
+        val selectedId = devices.activeId().orEmpty()
+        val rows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(selectedId)) }
+        if (selectedId != devices.activeId().orEmpty()) return
+        cachedRows = rows
+        renderDeviceStatus()
         monitoring.refresh()
         val locationRows = cachedRows.filter { it.type == "location" }
         latestLocation = locationRows.firstOrNull()
@@ -839,14 +982,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val warningCount = cachedRows.count {
-            if (it.type != "alert") return@count false
-            try {
-                JSONObject(it.metadataJson).optString("severity", "warning") == "warning"
-            } catch (_: Exception) {
-                true
-            }
-        }
+        val warningCount = DeviceStatus.warnings(cachedRows).size
         alertsButton.text = if (warningCount > 0) "🔔 " + warningCount else "🔔"
 
         if (currentFilter == "location") {

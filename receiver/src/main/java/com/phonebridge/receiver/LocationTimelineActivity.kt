@@ -45,6 +45,7 @@ import java.util.Date
 import java.util.Locale
 
 class LocationTimelineActivity : AppCompatActivity() {
+    private val devicePairId by lazy { intent.getStringExtra("devicePairId") ?: DeviceProfiles(this).activeId().orEmpty() }
     private val db by lazy { LocalDb.get(this) }
     private lateinit var mapView: MapView
     private lateinit var mapStatus: TextView
@@ -117,11 +118,11 @@ class LocationTimelineActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         liveDataJob = lifecycleScope.launch {
-            db.dao().observeAll().map { rows -> rows.filter { it.type == "location" } }
+            db.dao().observeAll().map { rows -> rows.filter { it.type == "location" && it.pairId == devicePairId } }
                 .distinctUntilChanged().collect { loadDay() }
         }
-        val pairId = getSharedPreferences("bridge", MODE_PRIVATE).getString("pairId", null)
-        if (pairId != null) {
+        val pairId = devicePairId
+        if (pairId.isNotBlank()) {
             queueListener = com.google.firebase.firestore.FirebaseFirestore.getInstance()
                 .collection("pairs").document(pairId).collection("queue")
                 .addSnapshotListener { snapshot, error ->
@@ -129,9 +130,10 @@ class LocationTimelineActivity : AppCompatActivity() {
                         it.type != com.google.firebase.firestore.DocumentChange.Type.REMOVED
                     } == true) {
                         androidx.work.WorkManager.getInstance(this).enqueueUniqueWork(
-                            "receiver-foreground-sync",
+                            "receiver-foreground-sync-$pairId",
                             androidx.work.ExistingWorkPolicy.APPEND_OR_REPLACE,
-                            androidx.work.OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
+                            androidx.work.OneTimeWorkRequestBuilder<ReceiverSyncWorker>()
+                                .setInputData(androidx.work.workDataOf(ReceiverSyncWorker.KEY_PAIR_ID to pairId)).build()
                         )
                     }
                 }
@@ -244,7 +246,7 @@ class LocationTimelineActivity : AppCompatActivity() {
             val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
             val rows = withContext(Dispatchers.IO) {
                 db.dao().deleteLocationsOlderThan(cutoff)
-                db.dao().locationsBetween(start, end)
+                db.dao().locationsBetween(start, end, devicePairId)
             }
             val points = rows.mapNotNull { row ->
                 try {

@@ -71,6 +71,13 @@
             android:text="Not connected"
             android:textColor="#CBD5E1"
             android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/btnPairingDevices"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Switch / manage devices"
+            android:textAllCaps="false" />
     </LinearLayout>
 
     <LinearLayout
@@ -159,6 +166,15 @@
                 android:textSize="28sp"
                 android:textAllCaps="false" />
         </LinearLayout>
+
+        <Button
+            android:id="@+id/btnDevices"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Switch device ▾"
+            android:textAllCaps="false"
+            android:textColor="#F8FAFC"
+            android:backgroundTint="#334155" />
 
         <HorizontalScrollView
             android:id="@+id/tabScroller"
@@ -264,7 +280,7 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Sender alerts and device status"
+                    android:text="Device warnings"
                     android:textColor="#FCA5A5"
                     android:textStyle="bold" />
 
@@ -273,10 +289,19 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:backgroundTint="#7F1D1D"
-                    android:text="Clear all"
+                    android:text="Clear warnings"
                     android:textColor="#FEE2E2"
                     android:textAllCaps="false" />
             </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/deviceStatusPanel"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone"
+                android:background="#0F172A"
+                android:padding="8dp" />
 
             <LinearLayout
                 android:layout_width="match_parent"

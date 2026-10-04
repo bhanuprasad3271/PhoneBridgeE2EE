@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.phonebridge.collector"
     compileSdk = 36
+    buildFeatures { buildConfig = true }
     lint {
         if (providers.gradleProperty("compatibilityLint").isPresent) {
             checkOnly += setOf("NewApi", "InlinedApi")
@@ -18,6 +19,7 @@ android {
         targetSdk = 36
         versionCode = providers.environmentVariable("PHONEBRIDGE_VERSION_CODE").orElse("1").get().toInt()
         versionName = "0.1.$versionCode"
+        buildConfigField("String", "GITHUB_BUILD", "\"${providers.environmentVariable("GITHUB_RUN_NUMBER").orElse("0").get()}\"")
     }
     flavorDimensions += "edition"
     productFlavors {

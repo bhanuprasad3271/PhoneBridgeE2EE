@@ -28,9 +28,11 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
     private val label = Button(context).apply { isAllCaps = false; textSize = 13f }
     private val next = Button(context).apply { text = "›"; contentDescription = "Next period" }
     private val dates = mutableMapOf<String, LocalDate>()
+    private val deviceId = { DeviceProfiles(context).activeId().orEmpty() }
+    private val sectionKey get() = deviceId() + "|" + section
     private var section = "message"
     private val weekly get() = section == "wp_call"
-    private val date get() = dates[section] ?: LocalDate.now()
+    private val date get() = dates[sectionKey] ?: LocalDate.now()
 
     init {
         val width = (48 * context.resources.displayMetrics.density).toInt()
@@ -41,13 +43,13 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
         next.setOnClickListener { move(1) }
         label.setOnClickListener {
             DatePickerDialog(context, { _, y, m, d ->
-                dates[section] = LocalDate.of(y, m + 1, d)
+                dates[sectionKey] = LocalDate.of(y, m + 1, d)
                 render(); changed()
             }, date.year, date.monthValue - 1, date.dayOfMonth).apply {
                 datePicker.maxDate = System.currentTimeMillis()
             }.show()
         }
-        label.setOnLongClickListener { dates.remove(section); render(); changed(); true }
+        label.setOnLongClickListener { dates.remove(sectionKey); render(); changed(); true }
         render()
     }
 
@@ -65,7 +67,7 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
         view.visibility != View.VISIBLE || RecordDateRange.contains(row.timestamp, date, weekly)
 
     private fun move(direction: Long) {
-        dates[section] = date.plusDays(direction * if (weekly) 7 else 1)
+        dates[sectionKey] = date.plusDays(direction * if (weekly) 7 else 1)
         render(); changed()
     }
 
@@ -78,3 +80,4 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
         next.isEnabled = first < RecordDateRange.start(LocalDate.now(), weekly)
     }
 }
+
