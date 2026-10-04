@@ -23,6 +23,12 @@ class EditionSwitchTest {
         prefs.pairedAtMs = 123456789L
         prefs.lastCallTimestamp = 234567890L
         prefs.locationSharingEnabled = true
+        // Each instrumentation invocation exits its process. Flush pending apply()
+        // writes before the next invocation checks persistence or replaces the APK.
+        assertTrue("Persist seeded pairing before test process exits",
+            context.getSharedPreferences("bridge", Context.MODE_PRIVATE).edit()
+                .putBoolean("edition_test_seeded", true).commit())
+        assertEquals("654321", prefs.pairId)
         context.getSharedPreferences("message_dedupe", Context.MODE_PRIVATE)
             .edit().putBoolean("edition_test_sentinel", true).commit()
         val crypto = CryptoBox(context, "phonebridge_collector_ecdh")
