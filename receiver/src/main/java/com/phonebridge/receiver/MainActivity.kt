@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
     private val statusValues = linkedMapOf<String, TextView>()
     private val queueListeners = mutableMapOf<String, ListenerRegistration>()
     private val deviceFilters = mutableMapOf<String, Map<String, FilterCriteria>>()
+    private var displayedHistoryId: String? = null
 
     private lateinit var adapter: RecordAdapter
     private lateinit var locationHistoryAdapter: RecordAdapter
@@ -356,9 +357,10 @@ class MainActivity : AppCompatActivity() {
             val detail = TextView(this).apply { text = "Loading status…"; textSize = 12f; setPadding(12, 0, 8, 12) }
             box.addView(detail)
             lifecycleScope.launch {
-                val state = withContext(Dispatchers.IO) { DeviceStatus.from(db.dao().forPair(profile.historyId)) }
+                val lastRecord = withContext(Dispatchers.IO) { db.dao().lastRecord(profile.historyId) }
+                val lastContact = lastRecord?.let { DeviceStatus.metadata(it).optLong("receiverReceivedAtMs", it.timestamp) } ?: 0L
                 val connection = when { profile.archived -> "Disconnected"; !profile.paired -> "Awaiting pairing"; else -> "Paired" }
-                val last = if (state.lastConnected > 0) SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(state.lastConnected)) else "Not received yet"
+                val last = if (lastContact > 0) SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(lastContact)) else "Not received yet"
                 detail.text = "$connection · Last connected: $last"
             }
         }
@@ -385,6 +387,7 @@ class MainActivity : AppCompatActivity() {
         locationRefreshProgress.text = "Ready · request a fresh location"
         locationDisplayNames.reloadSavedNames()
         monitoring.deviceChanged()
+        displayedHistoryId = devices.historyId(pairId)
         adapter.submit(emptyList())
         locationHistoryAdapter.submit(emptyList())
         renderDeviceStatus()
@@ -960,7 +963,15 @@ class MainActivity : AppCompatActivity() {
         val selectedId = devices.activeId().orEmpty()
         val historyId = devices.historyId(selectedId)
         val rows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(historyId)) }
-        if (selectedId != devices.activeId().orEmpty()) return
+        if (selectedId != devices.activeId().orEmpty() || historyId != devices.historyId(selectedId)) return
+        if (displayedHistoryId != historyId) {
+            displayedHistoryId = historyId
+            locationDisplayNames.reloadSavedNames()
+            monitoring.deviceChanged()
+            sectionFilters.clear()
+            sectionFilters.putAll(deviceFilters[historyId].orEmpty())
+            updateFilterButton()
+        }
         cachedRows = rows
         renderDeviceStatus()
         monitoring.refresh()
