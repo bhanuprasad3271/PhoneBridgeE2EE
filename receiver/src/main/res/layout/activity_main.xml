@@ -76,7 +76,7 @@
             android:id="@+id/btnPairingDevices"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Switch / manage devices"
+            android:text="Manage devices"
             android:textAllCaps="false" />
     </LinearLayout>
 
@@ -166,15 +166,6 @@
                 android:textSize="28sp"
                 android:textAllCaps="false" />
         </LinearLayout>
-
-        <Button
-            android:id="@+id/btnDevices"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Switch device ▾"
-            android:textAllCaps="false"
-            android:textColor="#F8FAFC"
-            android:backgroundTint="#334155" />
 
         <HorizontalScrollView
             android:id="@+id/tabScroller"

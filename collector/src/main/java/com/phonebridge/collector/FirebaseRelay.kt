@@ -7,8 +7,15 @@ import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.JsonCodec
 import com.phonebridge.shared.PlainRecord
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
 
 class FirebaseRelay(private val activityOrService: android.content.Context) {
+    companion object {
+        private val io = Executors.newSingleThreadExecutor()
+        private val callbacks = ConcurrentHashMap<String, (Boolean, String?) -> Unit>()
+        private var draining = false // accessed only on io
+    }
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
     private val prefs = BridgePrefs(activityOrService)
@@ -42,7 +49,7 @@ class FirebaseRelay(private val activityOrService: android.content.Context) {
                 pairRef.get()
                     .addOnSuccessListener { snap ->
                         val receiverKey = snap.getString("receiverPublicKeyB64")
-                        if (receiverKey.isNullOrBlank()) {
+                        if (snap.getLong("disconnectedAtMs") != null || receiverKey.isNullOrBlank()) {
                             done(false, "Receiver key missing")
                         } else {
                             prefs.receiverPublicKey = receiverKey
@@ -74,13 +81,61 @@ class FirebaseRelay(private val activityOrService: android.content.Context) {
                 "createdAt" to System.currentTimeMillis(),
                 "aadVersion" to 1
             )
-            db.collection("pairs").document(pairId)
-                .collection("queue").document(id)
-                .set(payload)
-                .addOnSuccessListener { done?.invoke(true, null) }
-                .addOnFailureListener { done?.invoke(false, it.message) }
+            if (done != null) callbacks[id] = done
+            io.execute {
+                if (prefs.pairId != pairId || prefs.receiverPublicKey != receiverKey) {
+                    callbacks.remove(id)?.invoke(false, "Pairing changed")
+                } else {
+                    SenderOutbox(activityOrService).put(id, pairId, payload)
+                    flushPending()
+                }
+            }
         } catch (e: Exception) {
             done?.invoke(false, e.message)
+        }
+    }
+
+    /** Firestore transactions fail offline; the encrypted outbox preserves offline delivery. */
+    fun flushPending() {
+        io.execute {
+            if (draining) return@execute
+            draining = true
+            drainNext()
+        }
+    }
+    private fun drainNext() {
+        val pair = prefs.pairId
+        val receiverKey = prefs.receiverPublicKey
+        val uid = auth.currentUser?.uid
+        if (pair == null || receiverKey == null || uid == null) { draining = false; return }
+        val outbox = SenderOutbox(activityOrService)
+        val payload = outbox.next(pair) ?: run { draining = false; return }
+        val id = payload.getValue("id").toString()
+        val ref = db.collection("pairs").document(pair)
+        db.runTransaction { tx ->
+            val snap = tx.get(ref)
+            if (!snap.exists() || snap.getLong("disconnectedAtMs") != null ||
+                snap.getString("collectorUid") != uid || snap.getString("receiverPublicKeyB64") != receiverKey ||
+                snap.getString("collectorPublicKeyB64") != crypto.publicKeyB64()) {
+                false
+            } else {
+                tx.set(ref.collection("queue").document(id), payload)
+                true
+            }
+        }.addOnSuccessListener { valid ->
+            io.execute {
+                if (!valid) {
+                    SenderPairState.disconnect(activityOrService, pair)
+                    callbacks.remove(id)?.invoke(false, "Disconnected by Receiver")
+                    draining = false
+                } else {
+                    outbox.delete(id)
+                    callbacks.remove(id)?.invoke(true, null)
+                    drainNext()
+                }
+            }
+        }.addOnFailureListener {
+            io.execute { draining = false } // retain encrypted payload until the next connection/sync
         }
     }
 }

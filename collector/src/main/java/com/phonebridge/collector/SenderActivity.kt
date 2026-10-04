@@ -3,6 +3,9 @@ package com.phonebridge.collector
 import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
@@ -25,6 +28,11 @@ abstract class SenderActivity : AppCompatActivity() {
     private lateinit var pairingScreen: View
     private lateinit var dashboardScreen: View
     protected lateinit var prefs: BridgePrefs
+    private val disconnected = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (prefs.pairId == null) { showPairing(); status.text = "Disconnected by Receiver. Enter a new pairing code to reconnect." }
+        }
+    }
 
     private val callPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -53,6 +61,7 @@ abstract class SenderActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         dashboardStatus = findViewById(R.id.dashboardStatus)
         prefs = BridgePrefs(this)
+        ContextCompat.registerReceiver(this, disconnected, IntentFilter(SenderPairState.ACTION_DISCONNECTED), ContextCompat.RECEIVER_NOT_EXPORTED)
         bindEditionUi()
 
         if (prefs.pairId != null && prefs.receiverPublicKey != null) {
@@ -140,10 +149,16 @@ abstract class SenderActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::prefs.isInitialized && prefs.pairId == null) showPairing()
         if (::prefs.isInitialized && prefs.pairId != null && prefs.receiverPublicKey != null) {
             updateEditionUi()
             reportSenderState(force = false)
         }
+    }
+
+    override fun onDestroy() {
+        unregisterReceiver(disconnected)
+        super.onDestroy()
     }
 
     protected open fun bindEditionUi() {}

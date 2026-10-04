@@ -16,6 +16,39 @@ class EditionSwitchTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val sentinel get() = context.getSharedPreferences("edition_switch_test", Context.MODE_PRIVATE)
 
+    @Test fun removalClearsPairAndOutboxButPreservesIdentity() {
+        val p = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val saved = p.all
+        val identity = CryptoBox(context, "phonebridge_collector_ecdh").publicKeyB64()
+        val box = SenderOutbox(context)
+        try {
+            p.edit().putString("pairId", "remove-test").putString("receiverPublicKey", "peer")
+                .putBoolean("locationSharingEnabled", true).commit()
+            box.put("remove-test-item", "remove-test", mapOf("id" to "remove-test-item", "ciphertextB64" to "encrypted-test"))
+            box.put("keep-test-item", "other-test", mapOf("id" to "keep-test-item", "ciphertextB64" to "other-encrypted"))
+            assertFalse(SenderPairState.disconnect(context, "old-pair"))
+            assertNotNull(box.next("remove-test"))
+            assertTrue(SenderPairState.disconnect(context, "remove-test"))
+            assertNull(BridgePrefs(context).pairId)
+            assertNull(BridgePrefs(context).receiverPublicKey)
+            assertFalse(BridgePrefs(context).locationSharingEnabled)
+            assertNull(box.next("remove-test"))
+            assertNotNull(box.next("other-test"))
+            assertEquals(identity, CryptoBox(context, "phonebridge_collector_ecdh").publicKeyB64())
+        } finally {
+            box.deletePair("remove-test"); box.deletePair("other-test")
+            val edit = p.edit().clear()
+            saved.forEach { (key, value) -> when (value) {
+                is String -> edit.putString(key, value)
+                is Long -> edit.putLong(key, value)
+                is Int -> edit.putInt(key, value)
+                is Boolean -> edit.putBoolean(key, value)
+                is Float -> edit.putFloat(key, value)
+            } }
+            edit.commit()
+        }
+    }
+
     @Test fun seedPairing() {
         val prefs = BridgePrefs(context)
         prefs.pairId = "654321"

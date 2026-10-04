@@ -28,7 +28,7 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
     private val label = Button(context).apply { isAllCaps = false; textSize = 13f }
     private val next = Button(context).apply { text = "›"; contentDescription = "Next period" }
     private val dates = mutableMapOf<String, LocalDate>()
-    private val deviceId = { DeviceProfiles(context).activeId().orEmpty() }
+    private val deviceId = { DeviceProfiles(context).let { it.historyId(it.activeId().orEmpty()) } }
     private val sectionKey get() = deviceId() + "|" + section
     private var section = "message"
     private val weekly get() = section == "wp_call"
@@ -80,4 +80,3 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
         next.isEnabled = first < RecordDateRange.start(LocalDate.now(), weekly)
     }
 }
-

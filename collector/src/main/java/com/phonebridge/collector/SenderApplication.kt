@@ -9,6 +9,7 @@ class SenderApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         SenderEdition.onProcessStart(this)
+        SenderPairMonitor.start(this)
     }
 }
 
