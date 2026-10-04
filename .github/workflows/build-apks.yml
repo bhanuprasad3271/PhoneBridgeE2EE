@@ -13,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -58,6 +59,19 @@ jobs:
       - name: Check Android API compatibility in both apps
         run: gradle :shared:lintDebug :collector:lintFullDebug :collector:lintLiteDebug :receiver:lintDebug -PcompatibilityLint --stacktrace
 
+      - name: Reserve disk space for Android emulator
+        run: |
+          # These preinstalled toolchains are unused by this Java/Kotlin build.
+          # Remove them only on the disposable GitHub-hosted runner.
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/swift /opt/ghc
+          df -h /
+          available_kb=$(df -Pk / | awk 'NR==2 {print $4}')
+          if [ "$available_kb" -lt 15728640 ]; then
+            echo "::error::Need at least 15 GiB free before installing and booting the emulator."
+            exit 1
+          fi
+
       - name: Enable emulator acceleration
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -70,8 +84,9 @@ jobs:
           api-level: 30
           arch: x86_64
           target: google_apis
-          # Bound disposable test data; the default partition exhausted runner disk.
+          # System-image minimums can exceed disk-size; reserve host disk above.
           disk-size: 2048M
+          emulator-boot-timeout: 300
           disable-animations: true
           script: |
             gradle :shared:connectedDebugAndroidTest :collector:assembleFullDebug :collector:assembleLiteDebug :collector:assembleFullDebugAndroidTest :collector:assembleLiteDebugAndroidTest :receiver:assembleDebug --stacktrace
