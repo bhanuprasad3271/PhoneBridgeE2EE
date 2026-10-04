@@ -16,6 +16,34 @@ class EditionSwitchTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
     private val sentinel get() = context.getSharedPreferences("edition_switch_test", Context.MODE_PRIVATE)
 
+    @Test fun statusReportsFollowEditionAndWaitForAcknowledgement() {
+        val prefs = BridgePrefs(context)
+        val edition = context.getString(R.string.sender_edition)
+        val version = context.packageManager.getPackageInfo(context.packageName, 0).versionName!!
+        prefs.lastReportedVersion = "unconfirmed"
+        val report = SenderStatusReport.create(context, version, "enabled", "enabled",
+            if (edition == "lite") "unsupported" else "enabled")
+        val revision = report.metadata.getValue("senderStateRevision").toLong()
+        assertTrue(revision > sentinel.getLong("statusRevision", 0L))
+        assertTrue(sentinel.edit().putLong("statusRevision", revision).commit())
+        val crypto = CryptoBox(context, "phonebridge_collector_ecdh")
+        val key = crypto.deriveAesKey(prefs.receiverPublicKey!!, prefs.pairId!!)
+        val (ct, nonce) = crypto.encrypt(key, com.phonebridge.shared.JsonCodec.encode(report).toByteArray(), byteArrayOf(1))
+        val decoded = com.phonebridge.shared.JsonCodec.decode(String(crypto.decrypt(key, ct, nonce, byteArrayOf(1))))
+        assertEquals(edition, decoded.metadata["senderEdition"])
+        assertEquals((edition == "full").toString(), decoded.metadata["supportsLocation"])
+        assertEquals(if (edition == "lite") "unsupported" else "enabled", decoded.metadata["locationSharing"])
+        assertEquals("unconfirmed", prefs.lastReportedVersion)
+        SenderStatusReport.acknowledge(context, "old-pair", prefs.receiverPublicKey!!, report)
+        assertEquals("unconfirmed", prefs.lastReportedVersion)
+        SenderStatusReport.acknowledge(context, prefs.pairId!!, prefs.receiverPublicKey!!, report)
+        assertEquals(version, prefs.lastReportedVersion)
+        SenderStatusReport.create(context, version, "disabled", "enabled", "off")
+        prefs.lastReportedVersion = "newer-unconfirmed"
+        SenderStatusReport.acknowledge(context, prefs.pairId!!, prefs.receiverPublicKey!!, report)
+        assertEquals("newer-unconfirmed", prefs.lastReportedVersion)
+    }
+
     @Test fun removalClearsPairAndOutboxButPreservesIdentity() {
         val p = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
         val saved = p.all

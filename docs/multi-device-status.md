@@ -50,6 +50,15 @@ unrecognized versions display Unknown. New Senders report the build explicitly.
   access, Location, Last connected, App version, GitHub build. Permission reports
   update current state; resolved reports are not displayed as repeated alert cards.
 - Clear warnings affects only the selected profile and preserves current status.
+- Opening/resuming Sender sends a complete current edition/permission snapshot.
+  A durable revision survives Full/Lite replacement and clock changes. Receiver
+  uses that revision for both persistence and display, so delayed Lite reports
+  cannot replace a newer Full snapshot. Older releases retain timestamp ordering
+  until the first revised report arrives. Status is marked reported only after
+  the encrypted queue upload succeeds; undelivered payloads remain in the outbox
+  and are flushed on reconnection or the next Sender resume/send. No polling or
+  foreground service is added. Receiver's existing Room observer refreshes its
+  status panel and location controls as soon as the snapshot is saved.
 - Last connected is the latest received record time (or historical Sender timestamp
   for old records), not proof of a persistent live connection. No heartbeat, hidden
   collection, foreground service, or periodic location work is added by Receiver.
@@ -59,5 +68,8 @@ profile migration, renaming, key preservation, Room migration, per-device isolat
 warning clearing, status precedence, explicit/historical build display, same-key
 recovery before expiry, expiry deletion, wrong-key isolation and Sender revocation
 cleanup/key preservation for each Full/Lite edition.
+Edition replacement also tests encrypted status metadata, revision persistence and
+delivery acknowledgement guards. Receiver tests stale Lite/permission reports,
+clock rollback, Room replacement, and switching back from Full to Lite.
 Real device battery restrictions and end-to-end pairing across physical phones still
 require user testing; emulator results are not a guarantee of all-device behavior.

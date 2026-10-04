@@ -9,9 +9,18 @@ data class DeviceStatus(val edition: String = "Unknown", val notifications: Stri
         val permissionKinds = setOf("call_permission", "notification_access", "location_sharing")
         fun metadata(row: RecordEntity): JSONObject = try { JSONObject(row.metadataJson) } catch (_: Exception) { JSONObject() }
         fun isWarning(row: RecordEntity): Boolean = row.type == "alert" && metadata(row).optString("severity", "warning") == "warning"
+        fun compareState(a: RecordEntity, b: RecordEntity): Int {
+            val am = metadata(a); val bm = metadata(b)
+            val ar = am.optLong("senderStateRevision", 0L)
+            val br = bm.optLong("senderStateRevision", 0L)
+            if (ar != br) return ar.compareTo(br)
+            return am.optLong("updatedAtMs", a.timestamp).compareTo(bm.optLong("updatedAtMs", b.timestamp))
+        }
+        private fun states(rows: List<RecordEntity>) = rows.filter { it.type in setOf("status", "alert") }
+            .sortedWith(Comparator { a, b -> compareState(b, a) })
         fun warnings(rows: List<RecordEntity>): List<RecordEntity> {
-            val sorted = rows.sortedByDescending { it.timestamp }
-            val newestStatus = sorted.firstOrNull { it.type == "status" }
+            val sorted = states(rows)
+            val newestStatus = sorted.firstOrNull { it.type == "status" && metadata(it).has("senderEdition") }
             val status = newestStatus?.let { metadata(it) }
             val seen = mutableSetOf<String>()
             return sorted.filter { row ->
@@ -20,14 +29,14 @@ data class DeviceStatus(val edition: String = "Unknown", val notifications: Stri
                 if (kind in permissionKinds && !seen.add(kind)) return@filter false
                 if (!isWarning(row)) return@filter false
                 val key = when (kind) { "call_permission" -> "callSync"; "notification_access" -> "notificationAccess"; "location_sharing" -> "locationSharing"; else -> null }
-                if (key != null && newestStatus != null && newestStatus.timestamp >= row.timestamp && status?.has(key) == true) {
+                if (key != null && newestStatus != null && compareState(newestStatus, row) >= 0 && status?.has(key) == true) {
                     val current = status?.optString(key).orEmpty()
                     if (kind == "location_sharing") current == "needs_permission" else current == "disabled"
                 } else true
             }
         }
         fun from(rows: List<RecordEntity>): DeviceStatus {
-            val sorted = rows.sortedByDescending { it.timestamp }
+            val sorted = states(rows)
             fun field(key: String, kind: String? = null): String? {
                 for (row in sorted) {
                     val m = metadata(row)
