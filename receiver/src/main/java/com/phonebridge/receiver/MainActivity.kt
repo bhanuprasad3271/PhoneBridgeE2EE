@@ -371,8 +371,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun Int.dp() = (this * resources.displayMetrics.density).toInt()
 
-    private fun switchDevice(pairId: String) {
-        deviceFilters[devices.historyId(devices.activeId().orEmpty())] = sectionFilters.toMap()
+    private fun switchDevice(pairId: String, saveCurrent: Boolean = true) {
+        if (saveCurrent) deviceFilters[devices.historyId(devices.activeId().orEmpty())] = sectionFilters.toMap()
         devices.select(pairId)
         sectionFilters.clear()
         sectionFilters.putAll(deviceFilters[devices.historyId(pairId)].orEmpty())
@@ -676,13 +676,16 @@ class MainActivity : AppCompatActivity() {
 
             if (pairSnap.getLong("disconnectedAtMs") != null && !pairSnap.metadata.isFromCache) {
                 lifecycleScope.launch {
-                    DeviceRecovery.mutex.withLock {
+                    val selected = DeviceRecovery.mutex.withLock {
                         pairSnap.getString("collectorPublicKeyB64")?.let { devices.bindSender(pairId, it) }
+                        val wasSelected = devices.activeId() == pairId
+                        if (wasSelected) deviceFilters[devices.historyId(pairId)] = sectionFilters.toMap()
                         devices.remove(pairId, pairSnap.getLong("disconnectedAtMs")!!)
+                        wasSelected
                     }
                     queueListeners.remove(pairId)?.remove()
                     DeviceRecovery.schedule(this@MainActivity)
-                    switchDevice(devices.activeId().orEmpty())
+                    if (selected) switchDevice(devices.activeId().orEmpty(), saveCurrent = false)
                 }
                 return@addSnapshotListener
             }
@@ -734,11 +737,15 @@ class MainActivity : AppCompatActivity() {
                 val key = snap.getString("collectorPublicKeyB64")
                 if (key != null) DeviceRecovery.mutex.withLock { devices.bindSender(pairId, key) }
                 if (snap.exists()) ref.update("disconnectedAtMs", System.currentTimeMillis()).await()
-                val selected = devices.activeId() == pairId
-                DeviceRecovery.mutex.withLock { devices.remove(pairId) }
+                val selected = DeviceRecovery.mutex.withLock {
+                    val wasSelected = devices.activeId() == pairId
+                    if (wasSelected) deviceFilters[devices.historyId(pairId)] = sectionFilters.toMap()
+                    devices.remove(pairId)
+                    wasSelected
+                }
                 queueListeners.remove(pairId)?.remove()
                 DeviceRecovery.schedule(this@MainActivity)
-                if (selected) switchDevice(devices.activeId().orEmpty())
+                if (selected) switchDevice(devices.activeId().orEmpty(), saveCurrent = false)
             } catch (error: Exception) {
                 AlertDialog.Builder(this@MainActivity).setTitle("Could not disconnect")
                     .setMessage("Reconnect to the internet and try again. ${error.message.orEmpty()}").setPositiveButton("OK", null).show()
