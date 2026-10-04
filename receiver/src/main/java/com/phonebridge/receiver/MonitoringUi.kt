@@ -20,7 +20,7 @@ import java.util.UUID
 
 /** Saved filters of data already received; no collection or account lookup. */
 class MonitoringUi(private val activity: AppCompatActivity, private val records: () -> List<RecordEntity>) {
-    private val prefs = activity.getSharedPreferences("monitoring", Context.MODE_PRIVATE)
+    private val prefs get() = activity.getSharedPreferences(DeviceProfiles.preferenceName(activity, "monitoring"), Context.MODE_PRIVATE)
     private var identities = read()
     private var refreshOpen: (() -> Unit)? = null
     private var dialog: AlertDialog? = null
@@ -44,6 +44,7 @@ class MonitoringUi(private val activity: AppCompatActivity, private val records:
     }
 
     fun refresh() { refreshOpen?.invoke() }
+    fun deviceChanged() { close(); identities = read() }
     fun close() {
         searchGeneration++
         searchJob?.cancel()

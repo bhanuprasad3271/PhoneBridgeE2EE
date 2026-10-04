@@ -91,6 +91,7 @@ jobs:
           script: |
             gradle :shared:connectedDebugAndroidTest :collector:assembleFullDebug :collector:assembleLiteDebug :collector:assembleFullDebugAndroidTest :collector:assembleLiteDebugAndroidTest :receiver:assembleDebug --stacktrace
             python3 scripts/test_sender_editions.py
+            gradle :receiver:connectedDebugAndroidTest --stacktrace
 
       - name: Test signing safeguards with a disposable key
         run: python3 -m unittest discover -s scripts -p 'test_apk_signing.py' -v
@@ -140,4 +141,4 @@ jobs:
             collector/build/outputs/apk/lite/debug/collector-lite-debug.apk
             APK-BUILD.txt
             docs/sender-editions.md
-
+            docs/multi-device-status.md

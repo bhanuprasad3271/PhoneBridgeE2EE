@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import androidx.room.withTransaction
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.QueryDocumentSnapshot
@@ -30,20 +31,22 @@ class ReceiverSyncWorker(
     private val db = LocalDb.get(appContext)
 
     override suspend fun doWork(): Result {
-        val prefs = applicationContext.getSharedPreferences("bridge", Context.MODE_PRIVATE)
-        val pairId = inputData.getString(KEY_PAIR_ID)
-            ?: prefs.getString("pairId", null)
-            ?: return Result.success()
+        val profiles = DeviceProfiles(applicationContext)
+        val requested = inputData.getString(KEY_PAIR_ID)
+        val pairIds = profiles.all().filter { !it.archived && (requested == null || it.pairId == requested) }.map { it.pairId }
+        if (pairIds.isEmpty()) return Result.success()
         val queueId = inputData.getString(KEY_QUEUE_ID)
 
         return try {
             if (auth.currentUser == null) auth.signInAnonymously().await()
+            var failed = false
+            for (pairId in pairIds) try {
             val pairRef = fs.collection("pairs").document(pairId)
             val pairSnap = pairRef.get().await()
-            if (!pairSnap.exists()) return Result.success()
+            if (!pairSnap.exists()) continue
 
             val collectorKey = pairSnap.getString("collectorPublicKeyB64")
-                ?: return Result.retry()
+                ?: continue
 
             if (queueId != null) {
                 val doc = pairRef.collection("queue").document(queueId).get().await()
@@ -55,10 +58,11 @@ class ReceiverSyncWorker(
                 }
             }
 
+            } catch (_: Exception) { failed = true }
             applicationContext.sendBroadcast(
                 Intent(ACTION_DATA_UPDATED).setPackage(applicationContext.packageName)
             )
-            Result.success()
+            if (failed) Result.retry() else Result.success()
         } catch (_: Exception) {
             Result.retry()
         }
@@ -80,14 +84,19 @@ class ReceiverSyncWorker(
         val plain = crypto.decrypt(key, ct, nonce, aad).toString(Charsets.UTF_8)
         val record = JsonCodec.decode(plain)
         val metadataJson = JSONObject(record.metadata)
+        metadataJson.put("receiverReceivedAtMs", System.currentTimeMillis())
         val sessionKey = metadataJson.optString("sessionKey")
 
+        val scopedIdentity = MessageIdentity.hash(pairId, collectorKey)
         val localId = when {
+            record.type == "status" -> "sender_status_$scopedIdentity"
+            record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds ->
+                "sender_permission_${scopedIdentity}_${metadataJson.optString("kind")}"
             record.type == "message" && record.metadata["messageId"]?.matches(Regex("msg_v1_[0-9a-f]{64}")) == true ->
                 "message_" + MessageIdentity.hash(pairId, collectorKey, record.metadata.getValue("messageId"))
             (record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank() ->
-                record.type + "_" + sessionKey.hashCode()
-            else -> id
+                record.type + "_" + MessageIdentity.hash(pairId, collectorKey, sessionKey)
+            else -> MessageIdentity.hash(pairId, collectorKey, id)
         }
 
         val entity = RecordEntity(
@@ -97,11 +106,14 @@ class ReceiverSyncWorker(
             source = record.source,
             title = record.title,
             body = record.body,
-            metadataJson = metadataJson.toString()
+            metadataJson = metadataJson.toString(),
+            pairId = pairId
         )
 
         val isReplaceableRecord =
-            record.type == "call" || record.type == "wp_call"
+            record.type == "call" || record.type == "wp_call" || record.type == "status" ||
+                record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds
+        db.withTransaction {
         val existing = if (isReplaceableRecord) db.dao().getById(localId) else null
         val newUpdatedAt = metadataJson.optLong("updatedAtMs", record.timestamp)
         val oldUpdatedAt = if (existing != null) {
@@ -116,6 +128,11 @@ class ReceiverSyncWorker(
 
         if (!isReplaceableRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
             db.dao().insert(entity)
+            if (record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds) {
+                // Keep current permission state independently of dismissible warnings.
+                db.dao().insert(entity.copy(id = "permission_state_$localId", type = "status"))
+            }
+        }
         }
 
         val locationRequestId = if (record.type == "location") {
