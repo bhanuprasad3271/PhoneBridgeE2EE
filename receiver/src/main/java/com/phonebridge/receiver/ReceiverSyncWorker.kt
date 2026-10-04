@@ -133,7 +133,11 @@ class ReceiverSyncWorker(
             Long.MIN_VALUE
         }
 
-        if (!isReplaceableRecord || existing == null || newUpdatedAt >= oldUpdatedAt) {
+        val isSenderState = record.type == "status" ||
+            record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds
+        val newer = if (isSenderState && existing != null) DeviceStatus.compareState(entity, existing) >= 0
+            else newUpdatedAt >= oldUpdatedAt
+        if (!isReplaceableRecord || existing == null || newer) {
             db.dao().insert(entity)
             if (record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds) {
                 // Keep current permission state independently of dismissible warnings.

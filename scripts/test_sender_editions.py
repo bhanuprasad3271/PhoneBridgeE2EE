@@ -45,11 +45,13 @@ if __name__ == "__main__":
     install("full")
     test("seedPairing")
     test("verifyPairingAndEdition")
+    test("statusReportsFollowEditionAndWaitForAcknowledgement")
     start_and_verify("full")
     test("removalClearsPairAndOutboxButPreservesIdentity")
     for edition in ("lite", "full", "lite"):
         install(edition)
         test("verifyPairingAndEdition")
+        test("statusReportsFollowEditionAndWaitForAcknowledgement")
         start_and_verify(edition)
         test("removalClearsPairAndOutboxButPreservesIdentity")
     adb("install", "-r", "receiver/build/outputs/apk/debug/receiver-debug.apk")

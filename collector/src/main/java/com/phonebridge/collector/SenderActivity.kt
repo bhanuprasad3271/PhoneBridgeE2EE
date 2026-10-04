@@ -152,7 +152,7 @@ abstract class SenderActivity : AppCompatActivity() {
         if (::prefs.isInitialized && prefs.pairId == null) showPairing()
         if (::prefs.isInitialized && prefs.pairId != null && prefs.receiverPublicKey != null) {
             updateEditionUi()
-            reportSenderState(force = false)
+            reportSenderState(force = true)
         }
     }
 
@@ -179,15 +179,22 @@ abstract class SenderActivity : AppCompatActivity() {
             "unknown"
         }
 
+        val pair = prefs.pairId ?: return
+        val receiverKey = prefs.receiverPublicKey ?: return
         val relay = FirebaseRelay(this)
         relay.ensureSignedIn { ok, _ ->
-            if (!ok) return@ensureSignedIn
+            if (!ok || prefs.pairId != pair || prefs.receiverPublicKey != receiverKey) return@ensureSignedIn
+            relay.flushPending()
 
             val callState = if (callGranted) "enabled" else "disabled"
             val stateChanged = prefs.lastCallPermissionState != callState ||
                 prefs.lastNotificationAccessState != (if (notifGranted) "enabled" else "disabled") ||
                 prefs.lastLocationPermissionState != locationState
-            if (force || prefs.lastCallPermissionState != callState) {
+            if (!force && !stateChanged && prefs.lastReportedVersion == version) return@ensureSignedIn
+            val notifState = if (notifGranted) "enabled" else "disabled"
+            val report = SenderStatusReport.create(this, version, callState, notifState, locationState)
+            val revision = report.metadata.getValue("senderStateRevision")
+            if (prefs.lastCallPermissionState != callState) {
                 relay.send(
                     PlainRecord(
                         type = "alert",
@@ -195,14 +202,12 @@ abstract class SenderActivity : AppCompatActivity() {
                         source = "sender",
                         title = if (callGranted) "Automatic call sync active" else "Call sync permission missing",
                         body = if (callGranted) "Phone 2 can send live call-state updates and finalize calls from the call log." else "Phone 2 needs Call Log and Phone State permissions for automatic call syncing.",
-                        metadata = mapOf("severity" to if (callGranted) "resolved" else "warning", "kind" to "call_permission", "state" to callState)
+                        metadata = mapOf("severity" to if (callGranted) "resolved" else "warning", "kind" to "call_permission", "state" to callState, "senderStateRevision" to revision)
                     )
                 )
-                prefs.lastCallPermissionState = callState
             }
 
-            val notifState = if (notifGranted) "enabled" else "disabled"
-            if (force || prefs.lastNotificationAccessState != notifState) {
+            if (prefs.lastNotificationAccessState != notifState) {
                 relay.send(
                     PlainRecord(
                         type = "alert",
@@ -210,13 +215,12 @@ abstract class SenderActivity : AppCompatActivity() {
                         source = "sender",
                         title = if (notifGranted) "Notification access active" else "Notification access disabled",
                         body = if (notifGranted) "Phone 2 can send permitted notification previews." else "Notification access must be enabled on Phone 2 to receive message and notification previews.",
-                        metadata = mapOf("severity" to if (notifGranted) "resolved" else "warning", "kind" to "notification_access", "state" to notifState)
+                        metadata = mapOf("severity" to if (notifGranted) "resolved" else "warning", "kind" to "notification_access", "state" to notifState, "senderStateRevision" to revision)
                     )
                 )
-                prefs.lastNotificationAccessState = notifState
             }
 
-            if (force || prefs.lastLocationPermissionState != locationState) {
+            if (prefs.lastLocationPermissionState != locationState) {
                 relay.send(
                     PlainRecord(
                         type = "alert",
@@ -237,33 +241,15 @@ abstract class SenderActivity : AppCompatActivity() {
                         metadata = mapOf(
                             "severity" to if (locationState == "needs_permission") "warning" else "resolved",
                             "kind" to "location_sharing",
-                            "state" to locationState
+                            "state" to locationState,
+                            "senderStateRevision" to revision
                         )
                     )
                 )
-                prefs.lastLocationPermissionState = locationState
             }
 
-            if (force || stateChanged || prefs.lastReportedVersion != version) {
-                relay.send(
-                    PlainRecord(
-                        type = "status",
-                        timestamp = System.currentTimeMillis(),
-                        source = "sender",
-                        title = "Sender app status",
-                        body = "Sender version $version is connected.",
-                        metadata = mapOf(
-                            "appVersion" to version,
-                            "githubBuild" to BuildConfig.GITHUB_BUILD,
-                            "senderEdition" to getString(R.string.sender_edition),
-                            "supportsLocation" to (locationState != "unsupported").toString(),
-                            "callSync" to callState,
-                            "notificationAccess" to notifState,
-                            "locationSharing" to locationState
-                        )
-                    )
-                )
-                prefs.lastReportedVersion = version
+            relay.send(report) { delivered, _ ->
+                if (delivered) SenderStatusReport.acknowledge(applicationContext, pair, receiverKey, report)
             }
         }
     }

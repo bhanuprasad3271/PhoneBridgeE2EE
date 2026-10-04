@@ -34,7 +34,8 @@ class CallLogWorker(appContext: android.content.Context, params: WorkerParameter
                     source = "sender",
                     title = "Call log permission removed",
                     body = "Phone 2 can no longer read new call-log entries.",
-                    metadata = mapOf("severity" to "warning", "kind" to "call_permission")
+                    metadata = mapOf("severity" to "warning", "kind" to "call_permission", "state" to "disabled",
+                        "senderStateRevision" to SenderStatusReport.nextRevision(applicationContext).toString())
                 )
             )
             return Result.failure()

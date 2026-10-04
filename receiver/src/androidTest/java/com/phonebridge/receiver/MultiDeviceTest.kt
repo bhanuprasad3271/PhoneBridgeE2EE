@@ -17,6 +17,31 @@ import java.util.UUID
 class MultiDeviceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun fullUpgradeReplacesLiteDespiteClockChangesAndDelayedDelivery() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, LocalDb::class.java).build()
+        fun state(edition: String, revision: Long, time: Long) = RecordEntity("sender-state", "status", time,
+            "sender", "", "", """{"senderEdition":"$edition","appVersion":"0.1.2154-$edition","senderStateRevision":"$revision","locationSharing":"${if (edition == "lite") "unsupported" else "enabled"}"}""", "test-pair")
+        val legacyLite = state("lite", 0, 90000)
+        val full = state("full", 2, 100)
+        val delayedLite = state("lite", 1, 80000)
+        try {
+            db.dao().insert(legacyLite)
+            for (incoming in listOf(full, delayedLite, legacyLite)) {
+                val existing = db.dao().getById(incoming.id)!!
+                if (DeviceStatus.compareState(incoming, existing) >= 0) db.dao().insert(incoming)
+            }
+            val status = DeviceStatus.from(db.dao().forPair("test-pair"))
+            assertEquals("Full", status.edition)
+            assertEquals("Enabled", status.location)
+            val oldPermission = RecordEntity("old-permission", "status", 99999, "sender", "", "",
+                """{"kind":"location_sharing","state":"unsupported","senderStateRevision":"1"}""", "test-pair")
+            assertEquals("Enabled", DeviceStatus.from(listOf(full, oldPermission)).location)
+            val liteAgain = state("lite", 3, 50)
+            assertTrue(DeviceStatus.compareState(liteAgain, full) > 0)
+            assertEquals("Unavailable in Lite", DeviceStatus.from(listOf(full, liteAgain)).location)
+        } finally { db.close() }
+    }
+
     @Test fun recoveryKeepsHistoryAndSettingsOnlyForSameKeyBeforeSixHours() = runBlocking {
         val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
         prefs.edit().clear().putBoolean("device_profiles_migrated", true).commit()

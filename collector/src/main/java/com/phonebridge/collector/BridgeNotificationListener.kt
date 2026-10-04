@@ -350,7 +350,9 @@ class BridgeNotificationListener : NotificationListenerService() {
                         source = "sender",
                         title = title,
                         body = body,
-                        metadata = mapOf("severity" to severity, "kind" to "notification_access")
+                        metadata = mapOf("severity" to severity, "kind" to "notification_access",
+                            "state" to if (severity == "resolved") "enabled" else "disabled",
+                            "senderStateRevision" to SenderStatusReport.nextRevision(this).toString())
                     )
                 )
             }
