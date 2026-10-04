@@ -18,6 +18,8 @@ data class RecordEntity(
 
 @Dao
 interface RecordDao {
+    @Query("DELETE FROM records WHERE pairId = :historyId")
+    suspend fun deleteDevice(historyId: String)
     @Query("SELECT * FROM records WHERE pairId = :pairId ORDER BY timestamp DESC")
     suspend fun forPair(pairId: String): List<RecordEntity>
 

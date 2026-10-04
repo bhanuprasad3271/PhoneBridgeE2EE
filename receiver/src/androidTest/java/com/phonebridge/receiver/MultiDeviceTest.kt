@@ -17,6 +17,51 @@ import java.util.UUID
 class MultiDeviceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun recoveryKeepsHistoryAndSettingsOnlyForSameKeyBeforeSixHours() = runBlocking {
+        val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        prefs.edit().clear().putBoolean("device_profiles_migrated", true).commit()
+        val profiles = DeviceProfiles(context)
+        val db = LocalDb.get(context)
+        val now = System.currentTimeMillis()
+        try {
+            profiles.add("old-A"); profiles.bindSender("old-A", "key-A")
+            profiles.rename("old-A", "C21Y")
+            profiles.add("live-B"); profiles.bindSender("live-B", "key-B")
+            profiles.select("old-A")
+            val setting = context.getSharedPreferences(DeviceProfiles.preferenceName(context, "monitoring", "old-A"), Context.MODE_PRIVATE)
+            setting.edit().putString("test", "kept").commit()
+            db.dao().insert(RecordEntity("recovery-A", "message", now, "sender", "", "saved A", "{}", "old-A"))
+            db.dao().insert(RecordEntity("recovery-B", "message", now, "sender", "", "saved B", "{}", "live-B"))
+            profiles.remove("old-A", now)
+            assertEquals("live-B", profiles.activeId())
+            assertFalse(profiles.visible().any { it.pairId == "old-A" })
+            DeviceRecovery.purge(context, now + DeviceProfiles.RECOVERY_MS - 1)
+            assertEquals(1, db.dao().forPair("old-A").size)
+            profiles.add("wrong"); profiles.bindSender("wrong", "key-other", now + 1)
+            assertEquals("wrong", profiles.historyId("wrong"))
+            profiles.add("new-A")
+            assertTrue(profiles.bindSender("new-A", "key-A", now + DeviceProfiles.RECOVERY_MS - 1))
+            assertEquals("old-A", profiles.historyId("new-A"))
+            assertEquals("C21Y", profiles.all().first { it.pairId == "new-A" }.name)
+            assertEquals("kept", context.getSharedPreferences(DeviceProfiles.preferenceName(context, "monitoring", "new-A"), Context.MODE_PRIVATE).getString("test", null))
+            DeviceRecovery.purge(context, now + DeviceProfiles.RECOVERY_MS)
+            assertEquals(1, db.dao().forPair("old-A").size) // old expiry cannot delete restored history
+            assertFalse(profiles.bindSender("new-A", "key-other", now + 1))
+            profiles.remove("new-A", now)
+            profiles.add("too-late")
+            profiles.bindSender("too-late", "key-A", now + DeviceProfiles.RECOVERY_MS)
+            assertEquals("too-late", profiles.historyId("too-late"))
+            DeviceRecovery.purge(context, now + DeviceProfiles.RECOVERY_MS)
+            assertTrue(db.dao().forPair("old-A").isEmpty())
+            assertTrue(setting.all.isEmpty())
+            assertEquals(1, db.dao().forPair("live-B").size)
+        } finally {
+            db.dao().deleteDevice("old-A"); db.dao().deleteDevice("live-B")
+            context.getSharedPreferences("monitoring_device_old-A", Context.MODE_PRIVATE).edit().clear().commit()
+            prefs.edit().clear().commit()
+        }
+    }
+
     @Test fun profilesMigrateRenameSwitchAndKeepKeys() {
         val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
         prefs.edit().clear().putString("pairId", "123456").commit()

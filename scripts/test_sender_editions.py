@@ -46,10 +46,12 @@ if __name__ == "__main__":
     test("seedPairing")
     test("verifyPairingAndEdition")
     start_and_verify("full")
+    test("removalClearsPairAndOutboxButPreservesIdentity")
     for edition in ("lite", "full", "lite"):
         install(edition)
         test("verifyPairingAndEdition")
         start_and_verify(edition)
+        test("removalClearsPairAndOutboxButPreservesIdentity")
     adb("install", "-r", "receiver/build/outputs/apk/debug/receiver-debug.apk")
     adb("shell", "am", "start", "-W", "-n", "com.phonebridge.receiver/.MainActivity")
     time.sleep(3)

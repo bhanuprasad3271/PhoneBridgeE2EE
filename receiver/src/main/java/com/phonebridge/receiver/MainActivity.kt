@@ -36,6 +36,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 import java.security.SecureRandom
 import java.text.SimpleDateFormat
@@ -56,7 +58,6 @@ class MainActivity : AppCompatActivity() {
     }
     private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
     private val devices by lazy { DeviceProfiles(this) }
-    private lateinit var deviceButton: Button
     private lateinit var deviceStatusPanel: LinearLayout
     private val statusValues = linkedMapOf<String, TextView>()
     private val queueListeners = mutableMapOf<String, ListenerRegistration>()
@@ -127,8 +128,6 @@ class MainActivity : AppCompatActivity() {
         status = findViewById(R.id.status)
         dashboardStatus = findViewById(R.id.dashboardStatus)
         devices.all() // Migrate the existing pairing without changing its key.
-        deviceButton = findViewById(R.id.btnDevices)
-        deviceButton.setOnClickListener { showDevices() }
         findViewById<Button>(R.id.btnPairingDevices).setOnClickListener { showDevices() }
         deviceStatusPanel = findViewById(R.id.deviceStatusPanel)
         for (label in listOf("Sender app", "Notifications", "Call access", "Location", "Last connected", "App version", "GitHub build")) {
@@ -205,7 +204,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnClearAlerts).setOnClickListener {
-            val selectedPairId = devices.activeId().orEmpty()
+            val selectedPairId = devices.historyId(devices.activeId().orEmpty())
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) {
                     db.dao().clearAlerts(selectedPairId)
@@ -233,6 +232,10 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        lifecycleScope.launch {
+            withContext(Dispatchers.IO) { DeviceRecovery.purge(this@MainActivity) }
+            DeviceRecovery.schedule(this@MainActivity)
+        }
         locationDisplayNames.reloadSavedNames()
         if (!updateReceiverRegistered) {
             ContextCompat.registerReceiver(
@@ -311,24 +314,12 @@ class MainActivity : AppCompatActivity() {
     private fun showSettingsMenu(anchor: View) {
         PopupMenu(this, anchor).apply {
             menu.add(0, 1, 0, "Pair another phone")
-            menu.add(0, 2, 1, "Reset pairing")
-            menu.add(0, 3, 2, "Remove pairing")
-            menu.add(0, 4, 3, "Switch / manage devices")
-            menu.add(0, 5, 4, "Name this device")
+            menu.add(0, 4, 1, "Manage devices")
             setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     4 -> { showDevices(); true }
-                    5 -> { renameDevice(); true }
                     1 -> {
                         confirmPairAnother()
-                        true
-                    }
-                    2 -> {
-                        confirmResetPairing()
-                        true
-                    }
-                    3 -> {
-                        confirmRemovePairing()
                         true
                     }
                     else -> false
@@ -339,23 +330,50 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDevices() {
-        val profiles = devices.all()
-        val names = profiles.map { it.name + when { it.archived -> " · archived"; !it.paired -> " · awaiting pairing"; else -> "" } + if (it.pairId == devices.activeId()) " ✓" else "" }
-        AlertDialog.Builder(this).setTitle("Switch / manage devices")
-            .setItems((names + "Earlier records" + "＋ Pair another phone").toTypedArray()) { _, index ->
-                when {
-                    index < profiles.size -> switchDevice(profiles[index].pairId)
-                    index == profiles.size -> switchDevice("")
-                    else -> confirmPairAnother()
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(20, 8, 20, 8) }
+        val dialog = AlertDialog.Builder(this).setTitle("Manage devices")
+            .setView(ScrollView(this).apply { addView(box) }).setNegativeButton("Close", null).create()
+        for (profile in devices.visible()) {
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            val label = TextView(this).apply {
+                text = profile.name + if (profile.pairId == devices.activeId()) " ✓" else ""
+                textSize = 16f; setPadding(12, 18, 8, 18)
+                setOnClickListener { dialog.dismiss(); switchDevice(profile.pairId) }
+            }
+            row.addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val more = Button(this).apply {
+                text = "⋮"; contentDescription = "Options for ${profile.name}"
+                setOnClickListener { anchor ->
+                    PopupMenu(this@MainActivity, anchor).apply {
+                        menu.add("Rename").setOnMenuItemClickListener { dialog.dismiss(); renameDevice(profile.pairId); true }
+                        menu.add("Remove device").setOnMenuItemClickListener { dialog.dismiss(); confirmRemoveDevice(profile.pairId); true }
+                        show()
+                    }
                 }
-            }.setNegativeButton("Close", null).show()
+            }
+            row.addView(more, LinearLayout.LayoutParams(56.dp(), LinearLayout.LayoutParams.WRAP_CONTENT))
+            box.addView(row)
+            val detail = TextView(this).apply { text = "Loading status…"; textSize = 12f; setPadding(12, 0, 8, 12) }
+            box.addView(detail)
+            lifecycleScope.launch {
+                val state = withContext(Dispatchers.IO) { DeviceStatus.from(db.dao().forPair(profile.historyId)) }
+                val connection = when { profile.archived -> "Disconnected"; !profile.paired -> "Awaiting pairing"; else -> "Paired" }
+                val last = if (state.lastConnected > 0) SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(state.lastConnected)) else "Not received yet"
+                detail.text = "$connection · Last connected: $last"
+            }
+        }
+        box.addView(Button(this).apply { text = "Earlier records"; isAllCaps = false; setOnClickListener { dialog.dismiss(); switchDevice("") } })
+        box.addView(Button(this).apply { text = "Pair another phone"; isAllCaps = false; setOnClickListener { dialog.dismiss(); confirmPairAnother() } })
+        dialog.show()
     }
 
+    private fun Int.dp() = (this * resources.displayMetrics.density).toInt()
+
     private fun switchDevice(pairId: String) {
-        deviceFilters[devices.activeId().orEmpty()] = sectionFilters.toMap()
+        deviceFilters[devices.historyId(devices.activeId().orEmpty())] = sectionFilters.toMap()
         devices.select(pairId)
         sectionFilters.clear()
-        sectionFilters.putAll(deviceFilters[pairId].orEmpty())
+        sectionFilters.putAll(deviceFilters[devices.historyId(pairId)].orEmpty())
         pairRegistration?.remove()
         pairRegistration = null
         recentAddressJob?.cancel()
@@ -376,8 +394,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch { refreshLocal() }
     }
 
-    private fun renameDevice() {
-        val id = devices.activeId()?.takeIf { it.isNotBlank() } ?: return
+    private fun renameDevice(id: String = devices.activeId().orEmpty()) {
         val profile = devices.all().firstOrNull { it.pairId == id } ?: return
         val input = EditText(this).apply { setText(profile.name); filters = arrayOf(android.text.InputFilter.LengthFilter(60)) }
         val dialog = AlertDialog.Builder(this).setTitle("Name this device").setView(input)
@@ -388,7 +405,6 @@ class MainActivity : AppCompatActivity() {
                 if (name.isBlank()) { input.error = "Enter a name"; return@setOnClickListener }
                 devices.rename(id, name)
                 if (devices.activeId() == id) {
-                    deviceButton.text = "${devices.activeName()} ▾ · ${devices.all().count { !it.archived }} devices"
                     dashboardStatus.text = devices.activeName() + if (profile.archived) " · stored records" else " · paired"
                 }
                 dialog.dismiss()
@@ -557,32 +573,14 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun confirmResetPairing() {
+    private fun confirmRemoveDevice(pairId: String) {
+        val profile = devices.visible().firstOrNull { it.pairId == pairId } ?: return
         AlertDialog.Builder(this)
-            .setTitle("Reset pairing?")
-            .setMessage("Disconnect only ${devices.activeName()}. Its stored records and other devices are kept. A new pairing creates a separate profile.")
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Reset") { _, _ ->
-                disconnectCurrentPair {
-                    pairCodeText.text = "------"
-                    status.text = "Pairing reset. Generate a new 6-digit code when ready."
-                    showPairing()
-                }
-            }
-            .show()
-    }
-
-    private fun confirmRemovePairing() {
-        AlertDialog.Builder(this)
-            .setTitle("Remove pairing?")
-            .setMessage("Disconnect only ${devices.activeName()}. Keep its profile as an archive, keep all stored records, and leave other devices connected.")
+            .setTitle("Remove ${profile.name}?")
+            .setMessage("Disconnect this device and hide its data. Pair the same Sender again within 6 hours to restore its history, name and settings. After 6 hours its saved data will be deleted. Other devices are kept.")
             .setNegativeButton("Cancel", null)
             .setPositiveButton("Remove") { _, _ ->
-                disconnectCurrentPair {
-                    pairCodeText.text = "------"
-                    status.text = "Pairing removed."
-                    showPairing()
-                }
+                disconnectDevice(pairId)
             }
             .show()
     }
@@ -673,6 +671,19 @@ class MainActivity : AppCompatActivity() {
                 return@addSnapshotListener
             }
 
+            if (pairSnap.getLong("disconnectedAtMs") != null && !pairSnap.metadata.isFromCache) {
+                lifecycleScope.launch {
+                    DeviceRecovery.mutex.withLock {
+                        pairSnap.getString("collectorPublicKeyB64")?.let { devices.bindSender(pairId, it) }
+                        devices.remove(pairId, pairSnap.getLong("disconnectedAtMs")!!)
+                    }
+                    queueListeners.remove(pairId)?.remove()
+                    DeviceRecovery.schedule(this@MainActivity)
+                    switchDevice(devices.activeId().orEmpty())
+                }
+                return@addSnapshotListener
+            }
+
             handleLocationRefreshStatus(
                 pairSnap.getString("locationRequestStatusId"),
                 pairSnap.getString("locationRequestStatus")
@@ -692,34 +703,43 @@ class MainActivity : AppCompatActivity() {
             }
 
             val wasPaired = devices.all().firstOrNull { it.pairId == pairId }?.paired == true
-            devices.markPaired(pairId)
-            showDashboard()
-            dashboardStatus.text = devices.activeName() + " · paired"
-            if (!wasPaired) renameDevice()
+            if (pairSnap.metadata.isFromCache) {
+                if (wasPaired) { showDashboard(); dashboardStatus.text = devices.activeName() + " · paired (offline status)" }
+                return@addSnapshotListener
+            }
+            lifecycleScope.launch {
+                withContext(Dispatchers.IO) { DeviceRecovery.purge(this@MainActivity) }
+                val oldHistoryId = devices.historyId(pairId)
+                val accepted = DeviceRecovery.mutex.withLock { devices.bindSender(pairId, collectorKey) }
+                if (!accepted || devices.activeId() != pairId) return@launch
+                if (oldHistoryId != devices.historyId(pairId)) {
+                    locationDisplayNames.reloadSavedNames()
+                    monitoring.deviceChanged()
+                }
+                showDashboard()
+                dashboardStatus.text = devices.activeName() + " · paired"
+            }
         }
     }
 
-    private fun disconnectCurrentPair(after: () -> Unit) {
-        val pairId = prefs.getString("pairId", null)
-        pairRegistration?.remove()
-        pairRegistration = null
-        queueRegistration?.remove()
-        queueRegistration = null
-        fun finish() {
-            if (pairId != null && pairId.isNotBlank()) devices.archive(pairId)
-            queueListeners.remove(pairId)?.remove()
-            after()
-        }
-
-        if (pairId.isNullOrBlank()) {
-            finish()
-        } else {
-            fs.collection("pairs").document(pairId).delete()
-                .addOnSuccessListener { finish() }
-                .addOnFailureListener { error ->
-                    AlertDialog.Builder(this).setTitle("Could not disconnect").setMessage(error.message).setPositiveButton("OK", null).show()
-                    listen(pairId)
-                }
+    private fun disconnectDevice(pairId: String) {
+        lifecycleScope.launch {
+            try {
+                val ref = fs.collection("pairs").document(pairId)
+                // Keep the member UIDs on a tombstone so Sender can read revocation.
+                val snap = ref.get(com.google.firebase.firestore.Source.SERVER).await()
+                val key = snap.getString("collectorPublicKeyB64")
+                if (key != null) DeviceRecovery.mutex.withLock { devices.bindSender(pairId, key) }
+                if (snap.exists()) ref.update("disconnectedAtMs", System.currentTimeMillis()).await()
+                val selected = devices.activeId() == pairId
+                DeviceRecovery.mutex.withLock { devices.remove(pairId) }
+                queueListeners.remove(pairId)?.remove()
+                DeviceRecovery.schedule(this@MainActivity)
+                if (selected) switchDevice(devices.activeId().orEmpty())
+            } catch (error: Exception) {
+                AlertDialog.Builder(this@MainActivity).setTitle("Could not disconnect")
+                    .setMessage("Reconnect to the internet and try again. ${error.message.orEmpty()}").setPositiveButton("OK", null).show()
+            }
         }
     }
 
@@ -733,7 +753,6 @@ class MainActivity : AppCompatActivity() {
     private fun showDashboard() {
         pairingScreen.visibility = View.GONE
         dashboardScreen.visibility = View.VISIBLE
-        deviceButton.text = "${devices.activeName()} ▾ · ${devices.all().count { !it.archived }} devices"
 
         enqueueReceiverSync()
         startQueueListener()
@@ -860,7 +879,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startQueueListener() {
-        for (device in devices.all().filter { !it.archived }) {
+        for (device in devices.visible().filter { !it.archived }) {
         val pairId = device.pairId
         if (queueListeners.containsKey(pairId)) continue
         queueListeners[pairId] = fs.collection("pairs")
@@ -939,7 +958,8 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun refreshLocal() {
         val selectedId = devices.activeId().orEmpty()
-        val rows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(selectedId)) }
+        val historyId = devices.historyId(selectedId)
+        val rows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(historyId)) }
         if (selectedId != devices.activeId().orEmpty()) return
         cachedRows = rows
         renderDeviceStatus()

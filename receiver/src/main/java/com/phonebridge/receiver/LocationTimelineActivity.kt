@@ -46,6 +46,7 @@ import java.util.Locale
 
 class LocationTimelineActivity : AppCompatActivity() {
     private val devicePairId by lazy { intent.getStringExtra("devicePairId") ?: DeviceProfiles(this).activeId().orEmpty() }
+    private val deviceHistoryId by lazy { DeviceProfiles(this).historyId(devicePairId) }
     private val db by lazy { LocalDb.get(this) }
     private lateinit var mapView: MapView
     private lateinit var mapStatus: TextView
@@ -118,7 +119,7 @@ class LocationTimelineActivity : AppCompatActivity() {
     override fun onStart() {
         super.onStart()
         liveDataJob = lifecycleScope.launch {
-            db.dao().observeAll().map { rows -> rows.filter { it.type == "location" && it.pairId == devicePairId } }
+            db.dao().observeAll().map { rows -> rows.filter { it.type == "location" && it.pairId == deviceHistoryId } }
                 .distinctUntilChanged().collect { loadDay() }
         }
         val pairId = devicePairId
@@ -246,7 +247,7 @@ class LocationTimelineActivity : AppCompatActivity() {
             val cutoff = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
             val rows = withContext(Dispatchers.IO) {
                 db.dao().deleteLocationsOlderThan(cutoff)
-                db.dao().locationsBetween(start, end, devicePairId)
+                db.dao().locationsBetween(start, end, deviceHistoryId)
             }
             val points = rows.mapNotNull { row ->
                 try {

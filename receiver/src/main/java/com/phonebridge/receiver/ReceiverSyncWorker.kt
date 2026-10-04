@@ -12,6 +12,7 @@ import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.JsonCodec
 import com.phonebridge.shared.MessageIdentity
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
 class ReceiverSyncWorker(
@@ -31,9 +32,10 @@ class ReceiverSyncWorker(
     private val db = LocalDb.get(appContext)
 
     override suspend fun doWork(): Result {
+        DeviceRecovery.purge(applicationContext)
         val profiles = DeviceProfiles(applicationContext)
         val requested = inputData.getString(KEY_PAIR_ID)
-        val pairIds = profiles.all().filter { !it.archived && (requested == null || it.pairId == requested) }.map { it.pairId }
+        val pairIds = profiles.visible().filter { !it.archived && (requested == null || it.pairId == requested) }.map { it.pairId }
         if (pairIds.isEmpty()) return Result.success()
         val queueId = inputData.getString(KEY_QUEUE_ID)
 
@@ -42,11 +44,13 @@ class ReceiverSyncWorker(
             var failed = false
             for (pairId in pairIds) try {
             val pairRef = fs.collection("pairs").document(pairId)
-            val pairSnap = pairRef.get().await()
-            if (!pairSnap.exists()) continue
+            val pairSnap = pairRef.get(com.google.firebase.firestore.Source.SERVER).await()
+            if (!pairSnap.exists() || pairSnap.getLong("disconnectedAtMs") != null) continue
 
             val collectorKey = pairSnap.getString("collectorPublicKeyB64")
                 ?: continue
+            val accepted = DeviceRecovery.mutex.withLock { profiles.bindSender(pairId, collectorKey) }
+            if (!accepted) continue
 
             if (queueId != null) {
                 val doc = pairRef.collection("queue").document(queueId).get().await()
@@ -87,15 +91,16 @@ class ReceiverSyncWorker(
         metadataJson.put("receiverReceivedAtMs", System.currentTimeMillis())
         val sessionKey = metadataJson.optString("sessionKey")
 
-        val scopedIdentity = MessageIdentity.hash(pairId, collectorKey)
+        val historyId = DeviceProfiles(applicationContext).historyId(pairId)
+        val scopedIdentity = MessageIdentity.hash(historyId, collectorKey)
         val localId = when {
             record.type == "status" -> "sender_status_$scopedIdentity"
             record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds ->
                 "sender_permission_${scopedIdentity}_${metadataJson.optString("kind")}"
             record.type == "message" && record.metadata["messageId"]?.matches(Regex("msg_v1_[0-9a-f]{64}")) == true ->
-                "message_" + MessageIdentity.hash(pairId, collectorKey, record.metadata.getValue("messageId"))
+                "message_" + MessageIdentity.hash(historyId, collectorKey, record.metadata.getValue("messageId"))
             (record.type == "wp_call" || record.type == "call") && sessionKey.isNotBlank() ->
-                record.type + "_" + MessageIdentity.hash(pairId, collectorKey, sessionKey)
+                record.type + "_" + MessageIdentity.hash(historyId, collectorKey, sessionKey)
             else -> MessageIdentity.hash(pairId, collectorKey, id)
         }
 
@@ -107,12 +112,14 @@ class ReceiverSyncWorker(
             title = record.title,
             body = record.body,
             metadataJson = metadataJson.toString(),
-            pairId = pairId
+            pairId = historyId
         )
 
         val isReplaceableRecord =
             record.type == "call" || record.type == "wp_call" || record.type == "status" ||
                 record.type == "alert" && metadataJson.optString("kind") in DeviceStatus.permissionKinds
+        DeviceRecovery.mutex.withLock {
+        if (DeviceProfiles(applicationContext).visible().none { it.pairId == pairId && !it.archived }) return
         db.withTransaction {
         val existing = if (isReplaceableRecord) db.dao().getById(localId) else null
         val newUpdatedAt = metadataJson.optLong("updatedAtMs", record.timestamp)
@@ -132,6 +139,7 @@ class ReceiverSyncWorker(
                 // Keep current permission state independently of dismissible warnings.
                 db.dao().insert(entity.copy(id = "permission_state_$localId", type = "status"))
             }
+        }
         }
         }
 
