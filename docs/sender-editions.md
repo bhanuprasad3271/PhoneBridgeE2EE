@@ -32,3 +32,17 @@ cover both distributed editions. Firebase live delivery and Realme-specific
 background behavior still require device validation.
 
 Update only Sender for this edition change. Receiver #145 may stay installed.
+
+## Download filenames
+
+The PhoneBridge-APKs artifact contains these files at its root, with the actual
+GitHub build number in place of N:
+
+- PhoneBridge-Sender-Full-N.apk
+- PhoneBridge-Sender-Lite-N.apk
+- PhoneBridge-Receiver-N.apk
+
+Packaging copies already verified signed APKs without changing their bytes.
+The internal collector module/package name remains the same, so updates preserve
+pairing and data. This filename change does not require updating either app.
+Previously uploaded artifacts retain their original filenames.
