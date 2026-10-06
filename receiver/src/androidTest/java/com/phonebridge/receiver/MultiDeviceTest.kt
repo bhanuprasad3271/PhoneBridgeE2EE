@@ -33,8 +33,10 @@ class MultiDeviceTest {
                 work.getWorkInfosByTag(ReceiverSyncRequests.name(b) + "-event")
                     .get(10, java.util.concurrent.TimeUnit.SECONDS).any { it.state != androidx.work.WorkInfo.State.BLOCKED })
             ReceiverSyncRequests.enqueue(context, a, restart = true).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
-            assertEquals(androidx.work.WorkInfo.State.CANCELLED,
-                work.getWorkInfoById(oldA.id).get(10, java.util.concurrent.TimeUnit.SECONDS)!!.state)
+            // REPLACE can delete the old WorkSpec rather than retain CANCELLED history.
+            val replaced = work.getWorkInfoById(oldA.id).get(10, java.util.concurrent.TimeUnit.SECONDS)
+            assertTrue("The old delayed job must no longer be active",
+                replaced == null || replaced.state == androidx.work.WorkInfo.State.CANCELLED)
             assertEquals(androidx.work.WorkInfo.State.ENQUEUED,
                 work.getWorkInfoById(oldB.id).get(10, java.util.concurrent.TimeUnit.SECONDS)!!.state)
             assertTrue(work.getWorkInfosForUniqueWork(ReceiverSyncRequests.name(a))
