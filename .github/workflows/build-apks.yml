@@ -134,7 +134,7 @@ jobs:
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
-          package_dir="dist/PhoneBridge-APKs"
+          package_dir="dist/PhoneBridge"
           mkdir -p "$package_dir"
           cp receiver/build/outputs/apk/debug/receiver-debug.apk "$package_dir/PhoneBridge-Receiver-${GITHUB_RUN_NUMBER}.apk"
           cp collector/build/outputs/apk/full/debug/collector-full-debug.apk "$package_dir/PhoneBridge-Sender-Full-${GITHUB_RUN_NUMBER}.apk"
@@ -142,12 +142,12 @@ jobs:
           cmp receiver/build/outputs/apk/debug/receiver-debug.apk "$package_dir/PhoneBridge-Receiver-${GITHUB_RUN_NUMBER}.apk"
           cmp collector/build/outputs/apk/full/debug/collector-full-debug.apk "$package_dir/PhoneBridge-Sender-Full-${GITHUB_RUN_NUMBER}.apk"
           cmp collector/build/outputs/apk/lite/debug/collector-lite-debug.apk "$package_dir/PhoneBridge-Sender-Lite-${GITHUB_RUN_NUMBER}.apk"
-          cp APK-BUILD.txt docs/sender-editions.md docs/multi-device-status.md "$package_dir/"
+          test "$(find "$package_dir" -mindepth 1 -maxdepth 1 | wc -l)" -eq 3
 
       - name: Upload APKs
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
-          name: PhoneBridge-APKs
-          path: dist/PhoneBridge-APKs/
+          name: PhoneBridge
+          path: dist/PhoneBridge/
           if-no-files-found: error
