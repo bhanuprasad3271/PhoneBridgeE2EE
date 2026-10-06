@@ -54,7 +54,7 @@ jobs:
           PY
 
       - name: Test Receiver timeline logic
-        run: gradle :receiver:testDebugUnitTest --stacktrace
+        run: gradle :receiver:testDebugUnitTest :receiver:assembleDebugAndroidTest --stacktrace
 
       - name: Check Android API compatibility in both apps
         run: gradle :shared:lintDebug :collector:lintFullDebug :collector:lintLiteDebug :receiver:lintDebug -PcompatibilityLint --stacktrace
