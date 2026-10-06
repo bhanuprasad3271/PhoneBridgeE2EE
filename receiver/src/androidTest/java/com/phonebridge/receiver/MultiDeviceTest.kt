@@ -17,6 +17,63 @@ import java.util.UUID
 class MultiDeviceTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
+    @Test fun switchingDeviceRestartsOnlyItsBlockedSyncChain() {
+        val work = androidx.work.WorkManager.getInstance(context)
+        val a = "sync-test-A"; val b = "sync-test-B"
+        fun stalled() = androidx.work.OneTimeWorkRequestBuilder<ReceiverSyncWorker>()
+            .setInitialDelay(1, java.util.concurrent.TimeUnit.DAYS).build()
+        val oldA = stalled(); val oldB = stalled()
+        try {
+            work.enqueueUniqueWork(ReceiverSyncRequests.name(a), androidx.work.ExistingWorkPolicy.REPLACE, oldA)
+                .result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            work.enqueueUniqueWork(ReceiverSyncRequests.name(b), androidx.work.ExistingWorkPolicy.REPLACE, oldB)
+                .result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            ReceiverSyncRequests.enqueue(context, b).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            ReceiverSyncRequests.enqueue(context, a, restart = true).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            assertEquals(androidx.work.WorkInfo.State.CANCELLED,
+                work.getWorkInfoById(oldA.id).get(10, java.util.concurrent.TimeUnit.SECONDS)!!.state)
+            assertEquals(androidx.work.WorkInfo.State.ENQUEUED,
+                work.getWorkInfoById(oldB.id).get(10, java.util.concurrent.TimeUnit.SECONDS)!!.state)
+            assertTrue(work.getWorkInfosForUniqueWork(ReceiverSyncRequests.name(a))
+                .get(10, java.util.concurrent.TimeUnit.SECONDS).any { it.id != oldA.id })
+        } finally {
+            work.cancelUniqueWork(ReceiverSyncRequests.name(a)).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            work.cancelUniqueWork(ReceiverSyncRequests.name(b)).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+        }
+    }
+
+    @Test fun inactiveSenderRecordsAreSavedDespiteOneBadQueueItem() = runBlocking {
+        val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        prefs.edit().clear().putBoolean("device_profiles_migrated", true).commit()
+        val profiles = DeviceProfiles(context)
+        val db = Room.inMemoryDatabaseBuilder(context, LocalDb::class.java).build()
+        try {
+            profiles.add("batch-A"); profiles.add("batch-B"); profiles.select("batch-B")
+            val acknowledged = mutableListOf<String>()
+            val complete = ReceiverQueueBatch.process(listOf("bad", "message", "call", "notification", "location")) { type ->
+                if (type == "bad") error("Undecodable test item")
+                db.dao().insert(RecordEntity(type, type, 1, "sender", "", "new A data", "{}", "batch-A"))
+                acknowledged.add(type)
+            }
+            assertFalse(complete) // retry the failed item, but not at the expense of new data
+            assertEquals("batch-B", profiles.activeId())
+            assertTrue(db.dao().forPair("batch-B").isEmpty())
+            profiles.select("batch-A")
+            assertEquals(setOf("message", "call", "notification", "location"),
+                db.dao().forPair(profiles.historyId(profiles.activeId()!!)).map { it.type }.toSet())
+            assertFalse("Failed records must not be acknowledged", "bad" in acknowledged)
+            var reachedSecond = false
+            try {
+                ReceiverQueueBatch.process(listOf(1, 2)) {
+                    if (it == 1) throw kotlinx.coroutines.CancellationException("switch restart")
+                    reachedSecond = true
+                }
+                fail("Cancellation must be propagated")
+            } catch (_: kotlinx.coroutines.CancellationException) { }
+            assertFalse(reachedSecond)
+        } finally { db.close(); prefs.edit().clear().commit() }
+    }
+
     @Test fun fullUpgradeReplacesLiteDespiteClockChangesAndDelayedDelivery() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, LocalDb::class.java).build()
         fun state(edition: String, revision: Long, time: Long) = RecordEntity("sender-state", "status", time,

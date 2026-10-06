@@ -12,6 +12,7 @@ import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.JsonCodec
 import com.phonebridge.shared.MessageIdentity
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
 
@@ -57,17 +58,19 @@ class ReceiverSyncWorker(
                 if (doc.exists()) processDoc(pairId, collectorKey, doc.id, doc.data.orEmpty())
             } else {
                 val snap = pairRef.collection("queue").get().await()
-                for (doc in snap.documents) {
+                if (!ReceiverQueueBatch.process(snap.documents) { doc ->
                     processDoc(pairId, collectorKey, doc.id, doc.data.orEmpty())
-                }
+                }) failed = true
             }
 
-            } catch (_: Exception) { failed = true }
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { failed = true }
             applicationContext.sendBroadcast(
                 Intent(ACTION_DATA_UPDATED).setPackage(applicationContext.packageName)
             )
             if (failed) Result.retry() else Result.success()
-        } catch (_: Exception) {
+        } catch (cancelled: CancellationException) { throw cancelled }
+          catch (_: Exception) {
             Result.retry()
         }
     }

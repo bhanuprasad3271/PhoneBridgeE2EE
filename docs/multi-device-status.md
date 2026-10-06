@@ -20,6 +20,14 @@ unrecognized versions display Unknown. New Senders report the build explicitly.
 - Every live profile is watched while Receiver is foregrounded. Background workers
   without an explicit pair sync all live profiles. Inactive devices' queues are not
   mistaken for the selected device's history.
+- Foreground sync uses separate network-constrained work chains for each device.
+  Opening Receiver restarts catch-up for every live profile; switching restarts
+  catch-up for the selected profile without stopping another device's listener or
+  sync. A retrying job cannot keep an explicit switch waiting through old backoff.
+  Terminal queue-listener errors remove the dead registration, allowing the next
+  switch/resume to reattach. A failed queue item remains unacknowledged for retry,
+  while other items are still saved. Stale overlapping local reads cannot overwrite
+  a newer screen refresh. No Sender change, polling or foreground service is added.
 - Remove device requires confirmation and a working internet connection. It marks
   the Firebase pair as disconnected, hides the selected profile/history immediately,
   and leaves other devices connected. Reset/remove/name are no longer separate menu

@@ -22,9 +22,6 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import androidx.work.ExistingWorkPolicy
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.DocumentChange
 import com.google.firebase.firestore.FirebaseFirestore
@@ -230,6 +227,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var liveDataJob: kotlinx.coroutines.Job? = null
+    private var localRefreshGeneration = 0L
 
     override fun onStart() {
         super.onStart()
@@ -251,6 +249,8 @@ class MainActivity : AppCompatActivity() {
             db.dao().observeAll().collectLatest { refreshLocal() }
         }
         if (auth.currentUser != null) {
+            ReceiverSyncRequests.catchUpAll(this)
+            startQueueListener()
             prefs.getString("pairId", null)?.let { listen(it) }
         }
     }
@@ -374,6 +374,9 @@ class MainActivity : AppCompatActivity() {
     private fun switchDevice(pairId: String, saveCurrent: Boolean = true) {
         if (saveCurrent) deviceFilters[devices.historyId(devices.activeId().orEmpty())] = sectionFilters.toMap()
         devices.select(pairId)
+        if (pairId.isNotBlank() && devices.visible().any { it.pairId == pairId && !it.archived }) {
+            ReceiverSyncRequests.enqueue(this, pairId, restart = true)
+        }
         sectionFilters.clear()
         sectionFilters.putAll(deviceFilters[devices.historyId(pairId)].orEmpty())
         pairRegistration?.remove()
@@ -634,6 +637,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun resumeExistingPair() {
+        ReceiverSyncRequests.catchUpAll(this)
+        startQueueListener()
         val pairId = prefs.getString("pairId", null)
         if (pairId == null) {
             pairCodeText.text = "------"
@@ -881,11 +886,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun enqueueReceiverSync() {
-        WorkManager.getInstance(this).enqueueUniqueWork(
-            "receiver-foreground-sync",
-            ExistingWorkPolicy.APPEND_OR_REPLACE,
-            OneTimeWorkRequestBuilder<ReceiverSyncWorker>().build()
-        )
+        for (device in devices.visible().filter { !it.archived }) {
+            ReceiverSyncRequests.enqueue(this, device.pairId)
+        }
     }
 
     private fun startQueueListener() {
@@ -897,6 +900,9 @@ class MainActivity : AppCompatActivity() {
             .collection("queue")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
+                    // Firestore listener errors are terminal. Do not keep a dead
+                    // registration that prevents reattachment on switch/resume.
+                    queueListeners.remove(pairId)?.remove()
                     if (devices.activeId() == pairId) dashboardStatus.text = devices.activeName() + " · waiting to reconnect"
                     return@addSnapshotListener
                 }
@@ -905,10 +911,7 @@ class MainActivity : AppCompatActivity() {
                     it.type == DocumentChange.Type.ADDED || it.type == DocumentChange.Type.MODIFIED
                 } == true
 
-                if (hasNewData) WorkManager.getInstance(this).enqueueUniqueWork(
-                    "receiver-foreground-sync-$pairId", ExistingWorkPolicy.APPEND_OR_REPLACE,
-                    OneTimeWorkRequestBuilder<ReceiverSyncWorker>()
-                        .setInputData(androidx.work.workDataOf(ReceiverSyncWorker.KEY_PAIR_ID to pairId)).build())
+                if (hasNewData) ReceiverSyncRequests.enqueue(this, pairId)
             }
         }
     }
@@ -967,10 +970,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private suspend fun refreshLocal() {
+        val generation = ++localRefreshGeneration
         val selectedId = devices.activeId().orEmpty()
         val historyId = devices.historyId(selectedId)
         val rows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(historyId)) }
-        if (selectedId != devices.activeId().orEmpty() || historyId != devices.historyId(selectedId)) return
+        if (generation != localRefreshGeneration || selectedId != devices.activeId().orEmpty() || historyId != devices.historyId(selectedId)) return
         if (displayedHistoryId != historyId) {
             displayedHistoryId = historyId
             locationDisplayNames.reloadSavedNames()
