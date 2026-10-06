@@ -130,15 +130,24 @@ jobs:
             echo "Certificate SHA-256: $PHONEBRIDGE_SIGNING_SHA256"
           } > APK-BUILD.txt
 
+      - name: Package APKs with app names
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          package_dir="dist/PhoneBridge-APKs"
+          mkdir -p "$package_dir"
+          cp receiver/build/outputs/apk/debug/receiver-debug.apk "$package_dir/PhoneBridge-Receiver-${GITHUB_RUN_NUMBER}.apk"
+          cp collector/build/outputs/apk/full/debug/collector-full-debug.apk "$package_dir/PhoneBridge-Sender-Full-${GITHUB_RUN_NUMBER}.apk"
+          cp collector/build/outputs/apk/lite/debug/collector-lite-debug.apk "$package_dir/PhoneBridge-Sender-Lite-${GITHUB_RUN_NUMBER}.apk"
+          cmp receiver/build/outputs/apk/debug/receiver-debug.apk "$package_dir/PhoneBridge-Receiver-${GITHUB_RUN_NUMBER}.apk"
+          cmp collector/build/outputs/apk/full/debug/collector-full-debug.apk "$package_dir/PhoneBridge-Sender-Full-${GITHUB_RUN_NUMBER}.apk"
+          cmp collector/build/outputs/apk/lite/debug/collector-lite-debug.apk "$package_dir/PhoneBridge-Sender-Lite-${GITHUB_RUN_NUMBER}.apk"
+          cp APK-BUILD.txt docs/sender-editions.md docs/multi-device-status.md "$package_dir/"
+
       - name: Upload APKs
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: PhoneBridge-APKs
-          path: |
-            receiver/build/outputs/apk/debug/receiver-debug.apk
-            collector/build/outputs/apk/full/debug/collector-full-debug.apk
-            collector/build/outputs/apk/lite/debug/collector-lite-debug.apk
-            APK-BUILD.txt
-            docs/sender-editions.md
-            docs/multi-device-status.md
+          path: dist/PhoneBridge-APKs/
+          if-no-files-found: error
