@@ -20,10 +20,12 @@ unrecognized versions display Unknown. New Senders report the build explicitly.
 - Every live profile is watched while Receiver is foregrounded. Background workers
   without an explicit pair sync all live profiles. Inactive devices' queues are not
   mistaken for the selected device's history.
-- Foreground sync uses separate network-constrained work chains for each device.
+- Foreground sync uses separate network-constrained requests for each device.
   Opening Receiver restarts catch-up for every live profile; switching restarts
   catch-up for the selected profile without stopping another device's listener or
   sync. A retrying job cannot keep an explicit switch waiting through old backoff.
+  New queue events are independent requests, not children of a retrying job, so
+  an old failed sync cannot block newly arriving records for an inactive device.
   Terminal queue-listener errors remove the dead registration, allowing the next
   switch/resume to reattach. A failed queue item remains unacknowledged for retry,
   while other items are still saved. Stale overlapping local reads cannot overwrite

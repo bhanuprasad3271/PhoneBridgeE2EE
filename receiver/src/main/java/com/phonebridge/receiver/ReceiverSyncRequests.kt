@@ -13,12 +13,17 @@ import kotlinx.coroutines.CancellationException
 /** Display selection never determines which device gets synchronized. */
 object ReceiverSyncRequests {
     fun name(pairId: String) = "receiver-foreground-sync-$pairId"
-    fun enqueue(context: Context, pairId: String, restart: Boolean = false): Operation =
-        WorkManager.getInstance(context).enqueueUniqueWork(name(pairId),
-            if (restart) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE,
-            OneTimeWorkRequestBuilder<ReceiverSyncWorker>()
+    fun enqueue(context: Context, pairId: String, restart: Boolean = false): Operation {
+        val request = OneTimeWorkRequestBuilder<ReceiverSyncWorker>()
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                .setInputData(workDataOf(ReceiverSyncWorker.KEY_PAIR_ID to pairId)).build())
+                .addTag(name(pairId) + "-event")
+                .setInputData(workDataOf(ReceiverSyncWorker.KEY_PAIR_ID to pairId)).build()
+        val work = WorkManager.getInstance(context)
+        // Queue events must not append behind an older job's retry backoff.
+        // Concurrent saves are serialized by DeviceRecovery.mutex and use stable IDs.
+        return if (restart) work.enqueueUniqueWork(name(pairId), ExistingWorkPolicy.REPLACE, request)
+            else work.enqueue(request)
+    }
 
     fun catchUpAll(context: Context) {
         // Retire the legacy all-device retry chain; each device now has its own.

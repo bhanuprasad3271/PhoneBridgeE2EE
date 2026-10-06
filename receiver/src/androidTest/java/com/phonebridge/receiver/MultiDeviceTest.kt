@@ -29,6 +29,9 @@ class MultiDeviceTest {
             work.enqueueUniqueWork(ReceiverSyncRequests.name(b), androidx.work.ExistingWorkPolicy.REPLACE, oldB)
                 .result.get(10, java.util.concurrent.TimeUnit.SECONDS)
             ReceiverSyncRequests.enqueue(context, b).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            assertTrue("New data must not wait behind the old delayed job",
+                work.getWorkInfosByTag(ReceiverSyncRequests.name(b) + "-event")
+                    .get(10, java.util.concurrent.TimeUnit.SECONDS).any { it.state != androidx.work.WorkInfo.State.BLOCKED })
             ReceiverSyncRequests.enqueue(context, a, restart = true).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
             assertEquals(androidx.work.WorkInfo.State.CANCELLED,
                 work.getWorkInfoById(oldA.id).get(10, java.util.concurrent.TimeUnit.SECONDS)!!.state)
@@ -39,6 +42,7 @@ class MultiDeviceTest {
         } finally {
             work.cancelUniqueWork(ReceiverSyncRequests.name(a)).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
             work.cancelUniqueWork(ReceiverSyncRequests.name(b)).result.get(10, java.util.concurrent.TimeUnit.SECONDS)
+            work.cancelAllWorkByTag(ReceiverSyncRequests.name(b) + "-event").result.get(10, java.util.concurrent.TimeUnit.SECONDS)
         }
     }
 
