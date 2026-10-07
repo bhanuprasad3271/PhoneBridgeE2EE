@@ -25,6 +25,18 @@ class SecurityBoundaryTest {
             val pair = "123456"
             val key = sender.deriveAesKey(receiver.publicKeyB64(), pair)
             val authorized = receiver.deriveAesKey(sender.publicKeyB64(), pair)
+            // Independently reproduce the original v1 derivation, not just two copies of new code.
+            val legacyShared = javax.crypto.KeyAgreement.getInstance("ECDH").apply {
+                init(sender.ensureKeyPair().private); doPhase(receiver.ensureKeyPair().public, true)
+            }.generateSecret()
+            val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+            val salt = java.security.MessageDigest.getInstance("SHA-256").digest("PhoneBridge|$pair".toByteArray())
+            mac.init(javax.crypto.spec.SecretKeySpec(salt, "HmacSHA256"))
+            val prk = mac.doFinal(legacyShared)
+            mac.init(javax.crypto.spec.SecretKeySpec(prk, "HmacSHA256"))
+            mac.update("PhoneBridge-AES-GCM-v1".toByteArray()); mac.update(1.toByte())
+            assertArrayEquals("Existing v1 encrypted records must remain readable", mac.doFinal(), key)
+            legacyShared.fill(0); prk.fill(0)
             val wrongReceiver = other.deriveAesKey(sender.publicKeyB64(), pair)
             val wrongPair = receiver.deriveAesKey(sender.publicKeyB64(), "654321")
             val aad = "$pair|record-1|message|1".toByteArray()
