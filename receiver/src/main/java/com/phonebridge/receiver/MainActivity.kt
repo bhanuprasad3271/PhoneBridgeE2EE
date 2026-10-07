@@ -53,7 +53,7 @@ class MainActivity : AppCompatActivity() {
     private val db by lazy {
         LocalDb.get(this)
     }
-    private val prefs by lazy { getSharedPreferences("bridge", MODE_PRIVATE) }
+    private val prefs by lazy { com.phonebridge.shared.SecurePreferences.get(this, "bridge") }
     private val devices by lazy { DeviceProfiles(this) }
     private lateinit var deviceStatusPanel: LinearLayout
     private val statusValues = linkedMapOf<String, TextView>()
@@ -613,7 +613,7 @@ class MainActivity : AppCompatActivity() {
             "collectorPublicKeyB64" to null,
             "createdAtMs" to now,
             "expiresAtMs" to now + 10 * 60 * 1000L,
-            "locationTriggerText" to DEFAULT_LOCATION_TRIGGER
+            "locationTriggerText" to "PBLOC#${UUID.randomUUID().toString().replace("-", "")}"
         )
 
         pairCodeText.text = code
@@ -676,6 +676,11 @@ class MainActivity : AppCompatActivity() {
                 queueListeners.remove(pairId)?.remove()
                 showDashboard()
                 dashboardStatus.text = devices.activeName() + " · pairing unavailable (records kept)"
+                return@addSnapshotListener
+            }
+
+            if (!com.phonebridge.shared.EnvelopePolicy.receiverOwns(pairSnap.data.orEmpty(), auth.currentUser?.uid, crypto.publicKeyB64())) {
+                status.text = "Pairing identity mismatch. No data will be accepted."
                 return@addSnapshotListener
             }
 

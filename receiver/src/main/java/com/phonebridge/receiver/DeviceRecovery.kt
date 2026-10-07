@@ -22,7 +22,7 @@ object DeviceRecovery {
         for (device in profiles.all().filter { it.removedAtMs > 0 && now >= it.removedAtMs + DeviceProfiles.RECOVERY_MS }) {
             LocalDb.get(context).dao().deleteDevice(device.historyId)
             for (base in listOf("monitoring", "timeline_place_names")) {
-                context.getSharedPreferences(DeviceProfiles.preferenceName(context, base, device.pairId), Context.MODE_PRIVATE).edit().clear().commit()
+                com.phonebridge.shared.SecurePreferences.get(context, DeviceProfiles.preferenceName(context, base, device.pairId)).edit().clear().commit()
             }
             profiles.forget(device.pairId)
         }
@@ -64,3 +64,4 @@ class DeviceExpiryWorker(context: Context, params: WorkerParameters) : Coroutine
         Result.success()
     } catch (_: Exception) { Result.retry() } }
 }
+

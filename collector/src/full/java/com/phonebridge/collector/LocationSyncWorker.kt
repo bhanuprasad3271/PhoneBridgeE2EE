@@ -56,7 +56,12 @@ class LocationSyncWorker(
                 .addOnSuccessListener { if (cont.isActive) cont.resume(it) }
                 .addOnFailureListener { if (cont.isActive) cont.resume(null) }
         }
-        val requestId = if (specialTextTrigger) {
+        if (requestSnapshot != null && !requestSnapshot.metadata.isFromCache &&
+            !PairAuthorization.active(applicationContext, requestSnapshot, pairId)) {
+            SenderPairState.disconnect(applicationContext, pairId)
+            return Result.success()
+        }
+        val requestId = if (specialTextTrigger || requestSnapshot == null || requestSnapshot.metadata.isFromCache) {
             null
         } else {
             requestSnapshot?.getString("locationRequestId")

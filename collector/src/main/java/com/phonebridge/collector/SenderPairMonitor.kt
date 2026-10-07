@@ -16,7 +16,7 @@ object SenderPairMonitor {
     fun start(context: Context) {
         if (this.context != null) return
         this.context = context.applicationContext
-        context.getSharedPreferences("bridge", Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(changed)
+        com.phonebridge.shared.SecurePreferences.get(context, "bridge").registerOnSharedPreferenceChangeListener(changed)
         watch(context.applicationContext)
     }
     private fun watch(context: Context) {
@@ -28,7 +28,9 @@ object SenderPairMonitor {
             if (!ok || prefs.pairId != pair || prefs.receiverPublicKey == null) return@ensureSignedIn
             registration = FirebaseFirestore.getInstance().collection("pairs").document(pair).addSnapshotListener(MetadataChanges.INCLUDE) { snap, error ->
                 if (error != null || snap == null || snap.metadata.isFromCache || prefs.pairId != pair) return@addSnapshotListener
-                if (!snap.exists() || snap.getLong("disconnectedAtMs") != null || snap.getString("receiverPublicKeyB64") != prefs.receiverPublicKey) SenderPairState.disconnect(context, pair)
+                if (!snap.exists() || snap.getLong("disconnectedAtMs") != null || snap.getString("receiverPublicKeyB64") != prefs.receiverPublicKey ||
+                    snap.getString("collectorUid") != com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ||
+                    snap.getString("collectorPublicKeyB64") != com.phonebridge.shared.CryptoBox(context, "phonebridge_collector_ecdh").publicKeyB64()) SenderPairState.disconnect(context, pair)
                 else FirebaseRelay(context).flushPending()
             }
         }

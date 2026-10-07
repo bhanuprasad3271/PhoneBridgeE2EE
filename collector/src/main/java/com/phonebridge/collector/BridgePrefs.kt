@@ -3,7 +3,7 @@ package com.phonebridge.collector
 import android.content.Context
 
 class BridgePrefs(ctx: Context) {
-    private val p = ctx.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+    private val p = com.phonebridge.shared.SecurePreferences.get(ctx, "bridge")
 
     var pairId: String?
         get() = p.getString("pairId", null)
@@ -70,3 +70,4 @@ class BridgePrefs(ctx: Context) {
         get() = p.getString("currentCallNumber", "").orEmpty()
         set(v) = p.edit().putString("currentCallNumber", v).apply()
 }
+

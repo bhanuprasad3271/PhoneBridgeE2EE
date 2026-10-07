@@ -10,7 +10,14 @@ import javax.crypto.spec.*
 class CryptoBox(private val context:Context,private val alias:String){
  fun ensureKeyPair():KeyPair = CompatibleKeyStore(context, alias).getOrCreate()
  fun publicKeyB64()=Base64.encodeToString(ensureKeyPair().public.encoded,Base64.NO_WRAP)
- private fun pub(s:String)=KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.decode(s,Base64.NO_WRAP)))
+ private fun pub(s:String):java.security.interfaces.ECPublicKey {
+  require(s.length in 1..512) { "Invalid peer key size" }
+  val key=KeyFactory.getInstance("EC").generatePublic(X509EncodedKeySpec(Base64.decode(s,Base64.NO_WRAP))) as java.security.interfaces.ECPublicKey
+  val params=AlgorithmParameters.getInstance("EC").apply { init(java.security.spec.ECGenParameterSpec("secp256r1")) }.getParameterSpec(java.security.spec.ECParameterSpec::class.java)
+  require(key.params.curve == params.curve && key.params.generator == params.generator && key.params.order == params.order && key.params.cofactor == params.cofactor) { "Only P-256 peer keys are accepted" }
+  return key
+ }
+ fun validatePeerKey(peer:String) { pub(peer) }
  fun deriveAesKey(peer:String,pairId:String):ByteArray{val k=ensureKeyPair();val a=KeyAgreement.getInstance("ECDH");a.init(k.private);a.doPhase(pub(peer),true);val shared=a.generateSecret();val salt=MessageDigest.getInstance("SHA-256").digest("PhoneBridge|$pairId".toByteArray());return hkdf(shared,salt,"PhoneBridge-AES-GCM-v1".toByteArray(),32)}
  fun encrypt(key:ByteArray,p:ByteArray,aad:ByteArray):Pair<String,String>{val n=ByteArray(12).also{SecureRandom().nextBytes(it)};val c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.ENCRYPT_MODE,SecretKeySpec(key,"AES"),GCMParameterSpec(128,n));c.updateAAD(aad);return Base64.encodeToString(c.doFinal(p),Base64.NO_WRAP) to Base64.encodeToString(n,Base64.NO_WRAP)}
  fun decrypt(key:ByteArray,ct:String,n:String,aad:ByteArray):ByteArray{val c=Cipher.getInstance("AES/GCM/NoPadding");c.init(Cipher.DECRYPT_MODE,SecretKeySpec(key,"AES"),GCMParameterSpec(128,Base64.decode(n,Base64.NO_WRAP)));c.updateAAD(aad);return c.doFinal(Base64.decode(ct,Base64.NO_WRAP))}

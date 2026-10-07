@@ -107,6 +107,7 @@ class LocationSharingService : Service() {
                     if (error != null || snapshot == null || !snapshot.exists()) {
                         return@addSnapshotListener
                     }
+                    if (!PairAuthorization.active(this, snapshot, pairId)) return@addSnapshotListener
 
                     val requestId = snapshot.getString("locationRequestId").orEmpty()
                     if (requestId.isBlank()) return@addSnapshotListener

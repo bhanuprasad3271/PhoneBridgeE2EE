@@ -12,7 +12,7 @@ data class DeviceProfile(
 
 /** Pair IDs remain the cryptographic context. Display names never change keys. */
 class DeviceProfiles(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+    private val prefs = com.phonebridge.shared.SecurePreferences.get(context.applicationContext, "bridge")
     init {
         synchronized(lock) {
             if (!prefs.getBoolean("device_profiles_migrated", false)) {
@@ -90,3 +90,4 @@ class DeviceProfiles(context: Context) {
             if (pairId.isNullOrEmpty()) base else "${base}_device_${DeviceProfiles(context).historyId(pairId)}"
     }
 }
+
