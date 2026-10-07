@@ -120,9 +120,15 @@ jobs:
           export PHONEBRIDGE_VERSION_CODE=$((PHONEBRIDGE_VERSION_CODE_BASE + GITHUB_RUN_NUMBER))
           gradle :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug --stacktrace
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
           test -n "$APKSIGNER"
+          test -n "$AAPT"
           for apk in receiver/build/outputs/apk/debug/receiver-debug.apk collector/build/outputs/apk/full/debug/collector-full-debug.apk collector/build/outputs/apk/lite/debug/collector-lite-debug.apk; do
             python3 scripts/apk_signing.py verify "$APKSIGNER" "$apk"
+            if "$AAPT" dump badging "$apk" | grep -q '^application-debuggable'; then
+              echo '::error::Refusing to distribute a debuggable APK'
+              exit 1
+            fi
           done
           {
             echo "Commit: $GITHUB_SHA"

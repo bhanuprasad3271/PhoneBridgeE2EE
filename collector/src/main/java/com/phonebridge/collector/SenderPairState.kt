@@ -8,7 +8,7 @@ object SenderPairState {
     const val ACTION_DISCONNECTED = "com.phonebridge.collector.PAIR_DISCONNECTED"
     /** Compare-and-clear: a delayed response for an old pair must never remove a new one. */
     fun disconnect(context: Context, expectedPair: String): Boolean = synchronized(this) {
-        val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val prefs = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         if (prefs.getString("pairId", null) != expectedPair) return@synchronized false
         check(prefs.edit().remove("pairId").remove("receiverPublicKey")
             .putBoolean("locationSharingEnabled", false).putLong("pairedAtMs", 0L)
@@ -27,3 +27,4 @@ object SenderPairState {
         true
     }
 }
+

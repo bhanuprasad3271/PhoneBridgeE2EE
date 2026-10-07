@@ -20,7 +20,7 @@ import java.util.UUID
 
 /** Saved filters of data already received; no collection or account lookup. */
 class MonitoringUi(private val activity: AppCompatActivity, private val records: () -> List<RecordEntity>) {
-    private val prefs get() = activity.getSharedPreferences(DeviceProfiles.preferenceName(activity, "monitoring"), Context.MODE_PRIVATE)
+    private val prefs get() = com.phonebridge.shared.SecurePreferences.get(activity, DeviceProfiles.preferenceName(activity, "monitoring"))
     private var identities = read()
     private var refreshOpen: (() -> Unit)? = null
     private var dialog: AlertDialog? = null
@@ -212,3 +212,4 @@ class MonitoringUi(private val activity: AppCompatActivity, private val records:
         editor.show()
     }
 }
+

@@ -3,6 +3,8 @@
 
     <application
         android:allowBackup="false"
+        android:fullBackupContent="@xml/backup_rules"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:usesCleartextTraffic="false"
         android:label="PhoneBridge"
         android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">

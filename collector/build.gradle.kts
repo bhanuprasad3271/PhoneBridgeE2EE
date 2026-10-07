@@ -39,6 +39,7 @@ android {
             keyPassword = signingValue("PHONEBRIDGE_KEY_PASSWORD")
         }
         buildTypes.getByName("debug") {
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("persistent")
         }
     }

@@ -10,7 +10,7 @@ import org.json.JSONObject
 
 /** Receiver-only preferences, independent of Room's location retention and schema. */
 class SavedPlaceStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(DeviceProfiles.preferenceName(context, "timeline_place_names"), Context.MODE_PRIVATE)
+    private val prefs = com.phonebridge.shared.SecurePreferences.get(context.applicationContext, DeviceProfiles.preferenceName(context, "timeline_place_names"))
     private val writeLock = Mutex()
     private var places = read()
     private val listeners = mutableSetOf<() -> Unit>()
@@ -57,3 +57,4 @@ class SavedPlaceStore(context: Context) {
         }.distinctBy { it.id }
     }
 }
+

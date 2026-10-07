@@ -67,7 +67,8 @@ abstract class LocalDb : RoomDatabase() {
         @Volatile private var instance: LocalDb? = null
 
         fun get(context: Context): LocalDb = instance ?: synchronized(this) {
-            instance ?: Room.databaseBuilder(context.applicationContext, LocalDb::class.java, "phonebridge.db")
+            instance ?: Room.databaseBuilder(context.applicationContext, LocalDb::class.java, EncryptedHistory.NAME)
+                .openHelperFactory(EncryptedHistory.prepare(context.applicationContext))
                 .addMigrations(MIGRATION_1_2)
                 .build().also { instance = it }
         }

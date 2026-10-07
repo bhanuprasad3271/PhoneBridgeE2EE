@@ -40,6 +40,7 @@ object SpecialTextLocation {
                 .document(pairId)
                 .get()
                 .addOnSuccessListener { snapshot ->
+                    if (!prefs.locationSharingEnabled || !PairAuthorization.active(context, snapshot, pairId)) return@addOnSuccessListener
                     val trigger = snapshot.getString("locationTriggerText")
                         ?.trim()
                         ?.takeIf { it.isNotEmpty() }

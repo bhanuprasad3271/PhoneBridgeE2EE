@@ -6,7 +6,7 @@ import com.phonebridge.shared.PlainRecord
 /** One complete snapshot, ordered independently of changes to the phone clock. */
 object SenderStatusReport {
     fun nextRevision(context: Context): Long = synchronized(this) {
-        val p = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val p = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         val next = p.getLong("senderStateRevision", 0L) + 1L
         check(p.edit().putLong("senderStateRevision", next).commit())
         next
@@ -24,7 +24,7 @@ object SenderStatusReport {
     }
 
     fun acknowledge(context: Context, pair: String, receiverKey: String, record: PlainRecord) = synchronized(this) {
-        val p = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val p = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         // An old delivery callback must not confirm another pair or a newer state.
         if (p.getString("pairId", null) == pair && p.getString("receiverPublicKey", null) == receiverKey &&
             p.getLong("senderStateRevision", 0L) == record.metadata["senderStateRevision"]?.toLongOrNull()) {
@@ -35,3 +35,4 @@ object SenderStatusReport {
         }
     }
 }
+
