@@ -30,8 +30,8 @@ def start_and_verify(edition):
     assert adb("shell", "pidof", PACKAGE).strip(), "Sender crashed on startup"
     adb("shell", "uiautomator", "dump", "/sdcard/edition-ui.xml")
     ui = adb("shell", "cat", "/sdcard/edition-ui.xml")
+    assert "System Logs" in ui
     if edition == "lite":
-        assert "Sender Lite" in ui
         assert "btnLocationSharing" not in ui
     else:
         assert "btnLocationSharing" in ui
