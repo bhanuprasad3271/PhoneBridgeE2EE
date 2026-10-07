@@ -18,7 +18,7 @@ class EncryptedHistoryTest {
         val base = InstrumentationRegistry.getInstrumentation().targetContext
         val root = File(base.cacheDir, "history-test-${UUID.randomUUID()}").apply { mkdirs() }
         val ctx = object : ContextWrapper(base) {
-            override fun getDatabasePath(name: String) = File(root, name)
+            override fun getDatabasePath(name: String) = if (File(name).isAbsolute) File(name) else File(root, name)
             override fun getNoBackupFilesDir() = File(root, "no-backup").apply { mkdirs() }
             override fun deleteDatabase(name: String) = SQLiteDatabase.deleteDatabase(getDatabasePath(name))
         }
@@ -36,7 +36,12 @@ class EncryptedHistoryTest {
         val factory = EncryptedHistory.prepare(ctx)
         val path = ctx.getDatabasePath(EncryptedHistory.NAME)
         val db = Room.databaseBuilder(ctx, LocalDb::class.java, path.absolutePath).openHelperFactory(factory).addMigrations(LocalDb.MIGRATION_1_2).build()
-        try { assertEquals("sensitive-history-sentinel", db.dao().all().single().body) } finally { db.close() }
+        try {
+            val rows = db.dao().all()
+            assertEquals("Room must reopen the exported database at ${path.path}", path.path, db.openHelper.writableDatabase.path)
+            assertEquals("All migrated rows must be retained", 1, rows.size)
+            assertEquals("sensitive-history-sentinel", rows.single().body)
+        } finally { db.close() }
         assertFalse(ctx.getDatabasePath("phonebridge.db").exists())
         val bytes = path.readBytes().toString(Charsets.ISO_8859_1)
         assertFalse(bytes.startsWith("SQLite format 3")); assertFalse(bytes.contains("sensitive-history-sentinel"))
