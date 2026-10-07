@@ -14,7 +14,7 @@ service cloud.firestore {
     function validStatus(p) {
       return p.locationRequestStatusId == p.locationRequestId && p.locationRequestStatusId is string &&
         p.locationRequestStatusAtMs is int && p.locationRequestStatus in
-          ['requested', 'sender_received', 'getting_location', 'location_unavailable', 'waiting_fresh',
+          ['requested', 'sender_received', 'getting_location', 'location_unavailable', 'location_failed', 'waiting_fresh',
            'sending', 'encrypting_sending', 'sent', 'sent_interim', 'interim_sent', 'cached_interim', 'receiver_saved', 'receiver_saved_interim', 'failed', 'send_failed'];
     }
     match /pairs/{pairId} {

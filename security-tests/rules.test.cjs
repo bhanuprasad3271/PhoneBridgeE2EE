@@ -82,7 +82,7 @@ test('location requests restricted to Receiver, status cannot change keys or req
   await assertFails(updateDoc(ref('sender-A'), request));
   await assertFails(updateDoc(ref('receiver-B'), request));
   await assertSucceeds(updateDoc(ref('receiver-A'), request));
-  for (const status of ['sender_received', 'encrypting_sending', 'interim_sent', 'waiting_fresh', 'send_failed', 'sent']) {
+  for (const status of ['sender_received', 'location_failed', 'encrypting_sending', 'interim_sent', 'waiting_fresh', 'send_failed', 'sent']) {
     await assertSucceeds(updateDoc(ref('sender-A'), { locationRequestStatus: status, locationRequestStatusAtMs: Date.now() }));
   }
   await assertFails(updateDoc(ref('sender-A'), { locationRequestStatusId: 'another-request' }));

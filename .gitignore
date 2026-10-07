@@ -9,3 +9,12 @@ collector/google-services.json
 receiver/google-services.json
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+**/node_modules/
+**/firestore-debug.log
+**/firebase-debug.log
+**/ui-debug.log
+**/__pycache__/
