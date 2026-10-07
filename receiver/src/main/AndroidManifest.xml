@@ -4,7 +4,7 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
-        android:label="PhoneBridge Receiver"
+        android:label="PhoneBridge"
         android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
 
         <activity
