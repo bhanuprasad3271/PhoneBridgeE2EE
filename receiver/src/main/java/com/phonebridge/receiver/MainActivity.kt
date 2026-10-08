@@ -1020,6 +1020,7 @@ class MainActivity : AppCompatActivity() {
             monitoring.deviceChanged()
             sectionFilters.clear()
             sectionFilters.putAll(deviceFilters[historyId].orEmpty())
+            recordDates.select(currentFilter)
             updateFilterButton()
         }
         cachedRows = rows
