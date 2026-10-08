@@ -10,11 +10,11 @@ import com.phonebridge.shared.WhatsAppNotificationClassifier
 class BridgeNotificationListener : NotificationListenerService() {
 
     private val voipPrefs by lazy {
-        getSharedPreferences("voip_call_sessions", MODE_PRIVATE)
+        com.phonebridge.shared.SecurePreferences.get(this, "voip_call_sessions")
     }
 
     private val messageDedupePrefs by lazy {
-        getSharedPreferences("message_dedupe", MODE_PRIVATE)
+        com.phonebridge.shared.SecurePreferences.get(this, "message_dedupe")
     }
 
     private val pendingMessages = java.util.Collections.synchronizedSet(mutableSetOf<String>())
@@ -359,4 +359,5 @@ class BridgeNotificationListener : NotificationListenerService() {
         }
     }
 }
+
 

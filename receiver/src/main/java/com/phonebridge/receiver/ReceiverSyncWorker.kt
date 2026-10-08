@@ -11,6 +11,7 @@ import com.google.firebase.firestore.QueryDocumentSnapshot
 import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.JsonCodec
 import com.phonebridge.shared.MessageIdentity
+import com.phonebridge.shared.EnvelopePolicy
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
@@ -47,6 +48,8 @@ class ReceiverSyncWorker(
             val pairRef = fs.collection("pairs").document(pairId)
             val pairSnap = pairRef.get(com.google.firebase.firestore.Source.SERVER).await()
             if (!pairSnap.exists() || pairSnap.getLong("disconnectedAtMs") != null) continue
+            if (!EnvelopePolicy.receiverOwns(pairSnap.data.orEmpty(), auth.currentUser?.uid, crypto.publicKeyB64())) continue
+            val collectorUid = pairSnap.getString("collectorUid") ?: continue
 
             val collectorKey = pairSnap.getString("collectorPublicKeyB64")
                 ?: continue
@@ -55,11 +58,11 @@ class ReceiverSyncWorker(
 
             if (queueId != null) {
                 val doc = pairRef.collection("queue").document(queueId).get().await()
-                if (doc.exists()) processDoc(pairId, collectorKey, doc.id, doc.data.orEmpty())
+                if (doc.exists()) processDoc(pairId, collectorKey, collectorUid, doc.id, doc.data.orEmpty())
             } else {
                 val snap = pairRef.collection("queue").get().await()
                 if (!ReceiverQueueBatch.process(snap.documents) { doc ->
-                    processDoc(pairId, collectorKey, doc.id, doc.data.orEmpty())
+                    processDoc(pairId, collectorKey, collectorUid, doc.id, doc.data.orEmpty())
                 }) failed = true
             }
 
@@ -78,18 +81,22 @@ class ReceiverSyncWorker(
     private suspend fun processDoc(
         pairId: String,
         collectorKey: String,
+        collectorUid: String,
         docId: String,
         data: Map<String, Any>
     ) {
-        val id = data["id"] as? String ?: docId
+        EnvelopePolicy.validate(pairId, docId, collectorUid, data)
+        val id = docId
         val type = data["type"] as? String ?: "unknown"
         val ct = data["ciphertextB64"] as? String ?: return
         val nonce = data["nonceB64"] as? String ?: return
 
         val key = crypto.deriveAesKey(collectorKey, pairId)
         val aad = (pairId + "|" + id + "|" + type + "|1").toByteArray()
-        val plain = crypto.decrypt(key, ct, nonce, aad).toString(Charsets.UTF_8)
+        val bytes = try { crypto.decrypt(key, ct, nonce, aad) } finally { key.fill(0) }
+        val plain = try { bytes.toString(Charsets.UTF_8) } finally { bytes.fill(0) }
         val record = JsonCodec.decode(plain)
+        require(record.type == type) { "Authenticated type mismatch" }
         val metadataJson = JSONObject(record.metadata)
         metadataJson.put("receiverReceivedAtMs", System.currentTimeMillis())
         val sessionKey = metadataJson.optString("sessionKey")

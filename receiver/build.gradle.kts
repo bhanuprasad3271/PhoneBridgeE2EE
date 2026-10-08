@@ -33,6 +33,7 @@ android {
             keyPassword = signingValue("PHONEBRIDGE_KEY_PASSWORD")
         }
         buildTypes.getByName("debug") {
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("persistent")
         }
     }
@@ -42,6 +43,7 @@ android {
     }
 }
 dependencies {
+    implementation("net.zetetic:sqlcipher-android:4.19.1@aar")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     // WorkManager's Future-returning APIs are exercised by the switching tests.

@@ -44,20 +44,25 @@ class FirebaseRelay(private val activityOrService: android.content.Context) {
             "collectorPairedAt" to FieldValue.serverTimestamp()
         )
 
-        pairRef.update(data)
-            .addOnSuccessListener {
-                pairRef.get()
-                    .addOnSuccessListener { snap ->
-                        val receiverKey = snap.getString("receiverPublicKeyB64")
-                        if (snap.getLong("disconnectedAtMs") != null || receiverKey.isNullOrBlank()) {
-                            done(false, "Receiver key missing")
-                        } else {
-                            prefs.receiverPublicKey = receiverKey
-                            done(true, null)
-                        }
-                    }
-                    .addOnFailureListener { done(false, it.message) }
+        pairRef.firestore.runTransaction { tx ->
+            val snap = tx.get(pairRef)
+            check(snap.exists() && snap.getLong("disconnectedAtMs") == null) { "Pairing unavailable" }
+            check(snap.getString("receiverUid") != uid) { "Cannot pair a device with itself" }
+            val receiverKey = snap.getString("receiverPublicKeyB64") ?: error("Receiver key missing")
+            crypto.validatePeerKey(receiverKey)
+            val owner = snap.getString("collectorUid")
+            if (owner == null) {
+                check((snap.getLong("expiresAtMs") ?: 0L) > System.currentTimeMillis()) { "Pairing code expired" }
+                tx.update(pairRef, data)
+            } else {
+                check(owner == uid && snap.getString("collectorPublicKeyB64") == publicKey) { "Pairing code already used" }
+                check(prefs.receiverPublicKey == null || prefs.receiverPublicKey == receiverKey) { "Receiver key changed" }
             }
+            receiverKey
+        }.addOnSuccessListener { receiverKey ->
+            if (prefs.pairId != pairId) done(false, "Pairing changed")
+            else { prefs.receiverPublicKey = receiverKey; done(true, null) }
+        }
             .addOnFailureListener { done(false, it.message) }
     }
 
@@ -70,7 +75,8 @@ class FirebaseRelay(private val activityOrService: android.content.Context) {
             val key = crypto.deriveAesKey(receiverKey, pairId)
             val id = UUID.randomUUID().toString()
             val aad = "$pairId|$id|${record.type}|1".toByteArray()
-            val (ct, nonce) = crypto.encrypt(key, JsonCodec.encode(record).toByteArray(), aad)
+            val plain = JsonCodec.encode(record).toByteArray(Charsets.UTF_8)
+            val (ct, nonce) = try { crypto.encrypt(key, plain, aad) } finally { key.fill(0); plain.fill(0) }
             val payload = mapOf(
                 "id" to id,
                 "pairId" to pairId,
