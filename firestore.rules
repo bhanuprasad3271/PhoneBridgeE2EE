@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function active(p) { return p.get('disconnectedAtMs', null) == null; }
+    function receiver(p) { return signedIn() && p.receiverUid == request.auth.uid; }
+    function sender(p) { return signedIn() && p.get('collectorUid', null) == request.auth.uid; }
+    function pending(p) {
+      return active(p) && p.get('collectorUid', null) == null &&
+        p.expiresAtMs is int && p.expiresAtMs > request.time.toMillis();
+    }
+    function key(k) { return k is string && k.size() >= 80 && k.size() <= 512; }
+    function statusFields() { return ['locationRequestStatusId', 'locationRequestStatus', 'locationRequestStatusAtMs']; }
+    function validStatus(p) {
+      return p.locationRequestStatusId == p.locationRequestId && p.locationRequestStatusId is string &&
+        p.locationRequestStatusAtMs is int && p.locationRequestStatus in
+          ['requested', 'sender_received', 'getting_location', 'location_unavailable', 'location_failed', 'waiting_fresh',
+           'sending', 'encrypting_sending', 'sent', 'sent_interim', 'interim_sent', 'cached_interim', 'receiver_saved', 'receiver_saved_interim', 'failed', 'send_failed'];
+    }
+    match /pairs/{pairId} {
+      // No enumeration. A short code is still a bearer invitation; see SECURITY.md.
+      allow list: if false;
+      allow get: if signedIn() && (resource == null || receiver(resource.data) || sender(resource.data) || pending(resource.data));
+      allow create: if signedIn() && pairId.matches('[0-9]{6}') &&
+        request.resource.data.keys().hasOnly(['receiverUid', 'receiverPublicKeyB64', 'collectorUid',
+          'collectorPublicKeyB64', 'createdAtMs', 'expiresAtMs', 'locationTriggerText']) &&
+        request.resource.data.receiverUid == request.auth.uid && key(request.resource.data.receiverPublicKeyB64) &&
+        request.resource.data.collectorUid == null && request.resource.data.collectorPublicKeyB64 == null &&
+        request.resource.data.createdAtMs is int && request.resource.data.expiresAtMs is int &&
+        request.resource.data.createdAtMs >= request.time.toMillis() - 300000 &&
+        request.resource.data.createdAtMs <= request.time.toMillis() + 300000 &&
+        request.resource.data.expiresAtMs > request.time.toMillis() &&
+        request.resource.data.expiresAtMs <= request.time.toMillis() + 900000 &&
+        request.resource.data.expiresAtMs <= request.resource.data.createdAtMs + 600000 &&
+        request.resource.data.locationTriggerText is string &&
+        request.resource.data.locationTriggerText.size() >= 6 && request.resource.data.locationTriggerText.size() <= 40;
+
+      // Exactly one Sender may claim a nonexpired invitation; identities never change afterward.
+      allow update: if signedIn() && pending(resource.data) && !receiver(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['collectorUid', 'collectorPublicKeyB64', 'collectorPairedAt']) &&
+        request.resource.data.collectorUid == request.auth.uid && key(request.resource.data.collectorPublicKeyB64) &&
+        request.resource.data.collectorPairedAt == request.time;
+
+      allow update: if receiver(resource.data) && active(resource.data) &&
+        ((request.resource.data.diff(resource.data).affectedKeys().hasOnly(['disconnectedAtMs']) &&
+          request.resource.data.disconnectedAtMs is int &&
+          request.resource.data.disconnectedAtMs >= request.time.toMillis() - 300000 &&
+          request.resource.data.disconnectedAtMs <= request.time.toMillis() + 300000) ||
+         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['locationTriggerText', 'locationTriggerUpdatedAtMs']) &&
+          request.resource.data.locationTriggerText is string && request.resource.data.locationTriggerText.size() >= 6 &&
+          request.resource.data.locationTriggerText.size() <= 40 && request.resource.data.locationTriggerUpdatedAtMs is int) ||
+         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['locationRequestId', 'locationRequestedAtMs',
+            'locationRequestStatusId', 'locationRequestStatus', 'locationRequestStatusAtMs']) &&
+          request.resource.data.locationRequestId is string && request.resource.data.locationRequestId.size() <= 128 &&
+          request.resource.data.locationRequestedAtMs is int && validStatus(request.resource.data)));
+
+      allow update: if active(resource.data) && (sender(resource.data) || receiver(resource.data)) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(statusFields()) && validStatus(request.resource.data);
+      // Retain revocation tombstones; a client cannot revive or replace an old code.
+      allow delete: if false;
+
+      match /queue/{id} {
+        function pair() { return get(/databases/$(database)/documents/pairs/$(pairId)).data; }
+        function validEnvelope(d) {
+          return d.keys().hasOnly(['id', 'pairId', 'type', 'ciphertextB64', 'nonceB64', 'senderUid', 'createdAt', 'aadVersion']) &&
+            d.id == id && id.matches('[A-Za-z0-9_-]{1,128}') && d.pairId == pairId &&
+            d.senderUid == request.auth.uid && d.aadVersion == 1 && d.createdAt is int &&
+            d.type in ['message', 'notification', 'call', 'wp_call', 'location', 'alert', 'status'] &&
+            d.ciphertextB64 is string && d.ciphertextB64.size() >= 24 && d.ciphertextB64.size() <= 786432 &&
+            d.nonceB64 is string && d.nonceB64.matches('[A-Za-z0-9+/]{16}');
+        }
+        // Receiver remains owner of old ciphertext for recovery/cleanup; revocation stops all new writes.
+        allow read: if receiver(pair());
+        allow create: if sender(pair()) && active(pair()) && validEnvelope(request.resource.data);
+        allow update: if sender(pair()) && active(pair()) && request.resource.data == resource.data;
+        allow delete: if receiver(pair());
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

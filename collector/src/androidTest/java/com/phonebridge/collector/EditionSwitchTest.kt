@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class EditionSwitchTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
-    private val sentinel get() = context.getSharedPreferences("edition_switch_test", Context.MODE_PRIVATE)
+    private val sentinel get() = com.phonebridge.shared.SecurePreferences.get(context, "edition_switch_test")
 
     @Test fun statusReportsFollowEditionAndWaitForAcknowledgement() {
         val prefs = BridgePrefs(context)
@@ -45,7 +45,7 @@ class EditionSwitchTest {
     }
 
     @Test fun removalClearsPairAndOutboxButPreservesIdentity() {
-        val p = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val p = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         val saved = p.all
         val identity = CryptoBox(context, "phonebridge_collector_ecdh").publicKeyB64()
         val box = SenderOutbox(context)
@@ -87,10 +87,10 @@ class EditionSwitchTest {
         // Each instrumentation invocation exits its process. Flush pending apply()
         // writes before the next invocation checks persistence or replaces the APK.
         assertTrue("Persist seeded pairing before test process exits",
-            context.getSharedPreferences("bridge", Context.MODE_PRIVATE).edit()
+            com.phonebridge.shared.SecurePreferences.get(context, "bridge").edit()
                 .putBoolean("edition_test_seeded", true).commit())
         assertEquals("654321", prefs.pairId)
-        context.getSharedPreferences("message_dedupe", Context.MODE_PRIVATE)
+        com.phonebridge.shared.SecurePreferences.get(context, "message_dedupe")
             .edit().putBoolean("edition_test_sentinel", true).commit()
         val crypto = CryptoBox(context, "phonebridge_collector_ecdh")
         val key = crypto.deriveAesKey(prefs.receiverPublicKey!!, prefs.pairId!!)
@@ -116,7 +116,7 @@ class EditionSwitchTest {
         assertEquals("654321", prefs.pairId)
         assertEquals(123456789L, prefs.pairedAtMs)
         assertEquals(234567890L, prefs.lastCallTimestamp)
-        assertTrue(context.getSharedPreferences("message_dedupe", Context.MODE_PRIVATE)
+        assertTrue(com.phonebridge.shared.SecurePreferences.get(context, "message_dedupe")
             .getBoolean("edition_test_sentinel", false))
         val crypto = CryptoBox(context, "phonebridge_collector_ecdh")
         assertEquals(sentinel.getString("publicKey", null), crypto.publicKeyB64())
@@ -149,3 +149,4 @@ class EditionSwitchTest {
         }
     }
 }
+

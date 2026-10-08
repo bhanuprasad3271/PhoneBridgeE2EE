@@ -49,7 +49,7 @@ class MultiDeviceTest {
     }
 
     @Test fun inactiveSenderRecordsAreSavedDespiteOneBadQueueItem() = runBlocking {
-        val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val prefs = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         prefs.edit().clear().putBoolean("device_profiles_migrated", true).commit()
         val profiles = DeviceProfiles(context)
         val db = Room.inMemoryDatabaseBuilder(context, LocalDb::class.java).build()
@@ -106,7 +106,7 @@ class MultiDeviceTest {
     }
 
     @Test fun recoveryKeepsHistoryAndSettingsOnlyForSameKeyBeforeSixHours() = runBlocking {
-        val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val prefs = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         prefs.edit().clear().putBoolean("device_profiles_migrated", true).commit()
         val profiles = DeviceProfiles(context)
         val db = LocalDb.get(context)
@@ -116,7 +116,7 @@ class MultiDeviceTest {
             profiles.rename("old-A", "C21Y")
             profiles.add("live-B"); profiles.bindSender("live-B", "key-B")
             profiles.select("old-A")
-            val setting = context.getSharedPreferences(DeviceProfiles.preferenceName(context, "monitoring", "old-A"), Context.MODE_PRIVATE)
+            val setting = com.phonebridge.shared.SecurePreferences.get(context, DeviceProfiles.preferenceName(context, "monitoring", "old-A"))
             setting.edit().putString("test", "kept").commit()
             db.dao().insert(RecordEntity("recovery-A", "message", now, "sender", "", "saved A", "{}", "old-A"))
             db.dao().insert(RecordEntity("recovery-B", "message", now, "sender", "", "saved B", "{}", "live-B"))
@@ -131,7 +131,7 @@ class MultiDeviceTest {
             assertTrue(profiles.bindSender("new-A", "key-A", now + DeviceProfiles.RECOVERY_MS - 1))
             assertEquals("old-A", profiles.historyId("new-A"))
             assertEquals("C21Y", profiles.all().first { it.pairId == "new-A" }.name)
-            assertEquals("kept", context.getSharedPreferences(DeviceProfiles.preferenceName(context, "monitoring", "new-A"), Context.MODE_PRIVATE).getString("test", null))
+            assertEquals("kept", com.phonebridge.shared.SecurePreferences.get(context, DeviceProfiles.preferenceName(context, "monitoring", "new-A")).getString("test", null))
             DeviceRecovery.purge(context, now + DeviceProfiles.RECOVERY_MS)
             assertEquals(1, db.dao().forPair("old-A").size) // old expiry cannot delete restored history
             assertFalse(profiles.bindSender("new-A", "key-other", now + 1))
@@ -145,13 +145,13 @@ class MultiDeviceTest {
             assertEquals(1, db.dao().forPair("live-B").size)
         } finally {
             db.dao().deleteDevice("old-A"); db.dao().deleteDevice("live-B")
-            context.getSharedPreferences("monitoring_device_old-A", Context.MODE_PRIVATE).edit().clear().commit()
+            com.phonebridge.shared.SecurePreferences.get(context, "monitoring_device_old-A").edit().clear().commit()
             prefs.edit().clear().commit()
         }
     }
 
     @Test fun profilesMigrateRenameSwitchAndKeepKeys() {
-        val prefs = context.getSharedPreferences("bridge", Context.MODE_PRIVATE)
+        val prefs = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         prefs.edit().clear().putString("pairId", "123456").commit()
         val key = CryptoBox(context, "phonebridge_receiver_ecdh").publicKeyB64()
         val profiles = DeviceProfiles(context)
@@ -218,3 +218,4 @@ class MultiDeviceTest {
         assertEquals("Unknown", DeviceStatus.from(emptyList()).edition)
     }
 }
+
