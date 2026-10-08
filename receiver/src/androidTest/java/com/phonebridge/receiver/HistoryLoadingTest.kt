@@ -46,6 +46,22 @@ class HistoryLoadingTest {
         } finally { db.close() }
     }
 
+    @Test fun versionTwoIndexMigrationPreservesHistory() = runBlocking {
+        val name = "period-migration-${java.util.UUID.randomUUID()}.db"
+        val path = context.getDatabasePath(name)
+        android.database.sqlite.SQLiteDatabase.openOrCreateDatabase(path, null).use {
+            it.execSQL("CREATE TABLE records (id TEXT NOT NULL PRIMARY KEY, type TEXT NOT NULL, timestamp INTEGER NOT NULL, source TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL, metadataJson TEXT NOT NULL, pairId TEXT NOT NULL DEFAULT '')")
+            it.execSQL("INSERT INTO records VALUES ('kept','message',1,'app','','kept','{}','A')")
+            it.version = 2
+        }
+        val db = Room.databaseBuilder(context, LocalDb::class.java, name)
+            .addMigrations(LocalDb.MIGRATION_2_3).build()
+        try {
+            assertEquals("kept", db.dao().period("A", listOf("message"), 0, 2).single().body)
+            assertTrue(db.dao().period("B", listOf("message"), 0, 2).isEmpty())
+        } finally { db.close(); context.deleteDatabase(name) }
+    }
+
     @Test fun receiverSurvivesRepeatedTabsWithLargeEncryptedHistory() = runBlocking {
         val prefs = com.phonebridge.shared.SecurePreferences.get(context, "bridge")
         prefs.edit().clear().putBoolean("device_profiles_migrated", true).putString("pairId", "").commit()
