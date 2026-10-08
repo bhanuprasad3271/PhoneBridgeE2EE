@@ -2,10 +2,8 @@ package com.phonebridge.receiver
 
 import android.content.ActivityNotFoundException
 import android.app.DatePickerDialog
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
@@ -18,7 +16,6 @@ import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -30,7 +27,8 @@ import com.phonebridge.shared.CryptoBox
 import com.phonebridge.shared.WhatsAppNotificationClassifier
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.withLock
@@ -97,18 +95,9 @@ class MainActivity : AppCompatActivity() {
 
     private var pairRegistration: ListenerRegistration? = null
     private var queueRegistration: ListenerRegistration? = null
-    private var updateReceiverRegistered = false
     private var activeLocationRefreshRequestId: String? = null
     private var locationRefreshStage = 0
 
-    private val dataUpdateReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            lifecycleScope.launch {
-            purgeExpiredLocations()
-            refreshLocal()
-        }
-        }
-    }
     private var currentFilter = "message"
     private var cachedRows: List<RecordEntity> = emptyList()
     private var latestLocation: RecordEntity? = null
@@ -237,24 +226,22 @@ class MainActivity : AppCompatActivity() {
     private var liveDataJob: kotlinx.coroutines.Job? = null
     private var localRefreshGeneration = 0L
 
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     override fun onStart() {
         super.onStart()
         lifecycleScope.launch {
-            withContext(Dispatchers.IO) { DeviceRecovery.purge(this@MainActivity) }
+            withContext(Dispatchers.IO) {
+                DeviceRecovery.purge(this@MainActivity)
+                purgeExpiredLocations()
+            }
             DeviceRecovery.schedule(this@MainActivity)
         }
         locationDisplayNames.reloadSavedNames()
-        if (!updateReceiverRegistered) {
-            ContextCompat.registerReceiver(
-                this,
-                dataUpdateReceiver,
-                IntentFilter(ReceiverSyncWorker.ACTION_DATA_UPDATED),
-                ContextCompat.RECEIVER_NOT_EXPORTED
-            )
-            updateReceiverRegistered = true
-        }
         liveDataJob = lifecycleScope.launch {
-            withContext(Dispatchers.IO) { db.dao() }.observeChanges().collectLatest { refreshLocal() }
+            // Room emits for every saved record. Cap UI/database refreshes while
+            // the online queue is being caught up; onCreate loads stored data now.
+            withContext(Dispatchers.IO) { db.dao() }.observeChanges()
+                .sample(1_500L).collect { refreshLocal() }
         }
         if (auth.currentUser != null) {
             ReceiverSyncRequests.catchUpAll(this)
@@ -271,10 +258,6 @@ class MainActivity : AppCompatActivity() {
         queueRegistration = null
         pairRegistration?.remove()
         pairRegistration = null
-        if (updateReceiverRegistered) {
-            unregisterReceiver(dataUpdateReceiver)
-            updateReceiverRegistered = false
-        }
         super.onStop()
     }
 
