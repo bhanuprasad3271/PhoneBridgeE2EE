@@ -28,8 +28,10 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
     private val label = Button(context).apply { isAllCaps = false; textSize = 13f }
     private val next = Button(context).apply { text = "›"; contentDescription = "Next period" }
     private val dates = mutableMapOf<String, LocalDate>()
-    private val deviceId = { DeviceProfiles(context).let { it.historyId(it.activeId().orEmpty()) } }
-    private val sectionKey get() = deviceId() + "|" + section
+    private val profiles = DeviceProfiles(context)
+    private var selectedDevice = ""
+    private val sectionKey get() = selectedDevice + "|" + section
+    private var bounds = 0L to 0L
     private var section = "message"
     private val weekly get() = section == "wp_call"
     private val date get() = dates[sectionKey] ?: LocalDate.now()
@@ -53,7 +55,11 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
         render()
     }
 
-    fun select(value: String) { section = value; render() }
+    fun select(value: String) {
+        selectedDevice = profiles.historyId(profiles.activeId().orEmpty())
+        section = value; render()
+    }
+    fun window(): Pair<Long, Long> = bounds
     fun customRange(from: Long?, to: Long?) {
         render()
         if (from != null || to != null) {
@@ -64,7 +70,7 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
         }
     }
     fun matches(row: RecordEntity): Boolean =
-        view.visibility != View.VISIBLE || RecordDateRange.contains(row.timestamp, date, weekly)
+        view.visibility != View.VISIBLE || (row.timestamp >= bounds.first && row.timestamp < bounds.second)
 
     private fun move(direction: Long) {
         dates[sectionKey] = date.plusDays(direction * if (weekly) 7 else 1)
@@ -74,9 +80,13 @@ class RecordDates(context: Context, private val changed: () -> Unit) {
     private fun render() {
         view.visibility = if (section in setOf("message", "call", "notification", "wp_call")) View.VISIBLE else View.GONE
         val first = RecordDateRange.start(date, weekly)
+        val zone = ZoneId.systemDefault()
+        bounds = first.atStartOfDay(zone).toInstant().toEpochMilli() to
+            first.plusDays(if (weekly) 7 else 1).atStartOfDay(zone).toInstant().toEpochMilli()
         val format = DateTimeFormatter.ofPattern("dd MMM yyyy")
         label.text = if (weekly) first.format(format) + " – " + first.plusDays(6).format(format) else first.format(format)
         label.contentDescription = "${label.text}. Choose date; hold to return to today"
         next.isEnabled = first < RecordDateRange.start(LocalDate.now(), weekly)
     }
 }
+
