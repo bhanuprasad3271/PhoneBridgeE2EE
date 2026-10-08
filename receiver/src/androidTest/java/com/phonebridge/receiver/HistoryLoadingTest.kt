@@ -21,7 +21,8 @@ class HistoryLoadingTest {
     private val today get() = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     @Test fun indexedPeriodKeepsDatesDevicesTypesAndReplacementUpdatesIsolated() = runBlocking {
-        val db = Room.inMemoryDatabaseBuilder(context, LocalDb::class.java).build()
+        val db = Room.inMemoryDatabaseBuilder(context, LocalDb::class.java)
+            .openHelperFactory(EncryptedHistory.prepare(context)).build()
         try {
             val dao = db.dao()
             db.withTransaction {
