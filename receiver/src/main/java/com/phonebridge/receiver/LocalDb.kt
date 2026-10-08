@@ -4,7 +4,7 @@ import androidx.room.*
 import android.content.Context
 import kotlinx.coroutines.flow.Flow
 
-@Entity(tableName = "records")
+@Entity(tableName = "records", indices = [Index(value = ["pairId", "type", "timestamp"])])
 data class RecordEntity(
     @PrimaryKey val id: String,
     val type: String,
@@ -18,6 +18,22 @@ data class RecordEntity(
 
 @Dao
 interface RecordDao {
+    // Invalidation without materializing every encrypted record on each insert.
+    @Query("SELECT COUNT(*) FROM records")
+    fun observeChanges(): Flow<Long>
+
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type IN (:types) AND timestamp >= :fromMs AND timestamp <= :toMs ORDER BY timestamp DESC")
+    suspend fun period(pairId: String, types: List<String>, fromMs: Long, toMs: Long): List<RecordEntity>
+
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type IN ('status', 'alert') ORDER BY timestamp DESC")
+    suspend fun statusRows(pairId: String): List<RecordEntity>
+
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type = 'location' ORDER BY timestamp DESC LIMIT 1")
+    suspend fun latestLocation(pairId: String): RecordEntity?
+
+    @Query("SELECT COALESCE(MAX(CASE WHEN json_valid(metadataJson) THEN COALESCE(json_extract(metadataJson, '$.receiverReceivedAtMs'), timestamp) ELSE timestamp END), 0) FROM records WHERE pairId = :pairId")
+    suspend fun lastConnected(pairId: String): Long
+
     @Query("DELETE FROM records WHERE pairId = :historyId")
     suspend fun deleteDevice(historyId: String)
 
@@ -54,7 +70,7 @@ interface RecordDao {
     suspend fun deleteLocationsOlderThan(cutoffMs: Long)
 }
 
-@Database(entities = [RecordEntity::class], version = 2, exportSchema = false)
+@Database(entities = [RecordEntity::class], version = 3, exportSchema = false)
 abstract class LocalDb : RoomDatabase() {
     abstract fun dao(): RecordDao
 
@@ -64,12 +80,17 @@ abstract class LocalDb : RoomDatabase() {
                 db.execSQL("ALTER TABLE records ADD COLUMN pairId TEXT NOT NULL DEFAULT ''")
             }
         }
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_records_pairId_type_timestamp ON records(pairId, type, timestamp)")
+            }
+        }
         @Volatile private var instance: LocalDb? = null
 
         fun get(context: Context): LocalDb = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, LocalDb::class.java, EncryptedHistory.NAME)
                 .openHelperFactory(EncryptedHistory.prepare(context.applicationContext))
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build().also { instance = it }
         }
     }

@@ -35,7 +35,7 @@ class EncryptedHistoryTest {
         seed(ctx)
         val factory = EncryptedHistory.prepare(ctx)
         val path = ctx.getDatabasePath(EncryptedHistory.NAME)
-        val db = Room.databaseBuilder(ctx, LocalDb::class.java, path.absolutePath).openHelperFactory(factory).addMigrations(LocalDb.MIGRATION_1_2).build()
+        val db = Room.databaseBuilder(ctx, LocalDb::class.java, path.absolutePath).openHelperFactory(factory).addMigrations(LocalDb.MIGRATION_1_2, LocalDb.MIGRATION_2_3).build()
         try {
             val rows = db.dao().all()
             assertEquals("Room must reopen the exported database at ${path.path}", path.path, db.openHelper.writableDatabase.path)
@@ -46,7 +46,7 @@ class EncryptedHistoryTest {
         val bytes = path.readBytes().toString(Charsets.ISO_8859_1)
         assertFalse(bytes.startsWith("SQLite format 3")); assertFalse(bytes.contains("sensitive-history-sentinel"))
         val reopened = Room.databaseBuilder(ctx, LocalDb::class.java, path.absolutePath)
-            .openHelperFactory(EncryptedHistory.prepare(ctx)).addMigrations(LocalDb.MIGRATION_1_2).build()
+            .openHelperFactory(EncryptedHistory.prepare(ctx)).addMigrations(LocalDb.MIGRATION_1_2, LocalDb.MIGRATION_2_3).build()
         try { assertEquals("sensitive-history-sentinel", reopened.dao().all().single().body) } finally { reopened.close() }
     } }
     @Test fun invalidTargetCannotDestroyPlaintextSource() = isolated { ctx ->

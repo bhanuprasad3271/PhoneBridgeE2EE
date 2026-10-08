@@ -19,7 +19,7 @@ import org.json.JSONObject
 import java.util.UUID
 
 /** Saved filters of data already received; no collection or account lookup. */
-class MonitoringUi(private val activity: AppCompatActivity, private val records: () -> List<RecordEntity>) {
+class MonitoringUi(private val activity: AppCompatActivity, private val records: suspend () -> List<RecordEntity>) {
     private val prefs get() = com.phonebridge.shared.SecurePreferences.get(activity, DeviceProfiles.preferenceName(activity, "monitoring"))
     private var identities = read()
     private var refreshOpen: (() -> Unit)? = null
@@ -108,7 +108,7 @@ class MonitoringUi(private val activity: AppCompatActivity, private val records:
         var allMatches: List<RecordEntity> = emptyList()
         var visibleLimit = 100
         var lastItem: MonitorIdentity? = null
-        var lastSnapshot: List<RecordEntity>? = null
+
         fun renderMatches(item: MonitorIdentity) {
             val count = minOf(visibleLimit, allMatches.size)
             adapter.submit(allMatches.take(count))
@@ -121,11 +121,8 @@ class MonitoringUi(private val activity: AppCompatActivity, private val records:
         }
         val update: () -> Unit = update@ {
             val item = selected()
-            val snapshot = records()
-            if (item == lastItem && snapshot === lastSnapshot) return@update
             val changedIdentity = item != lastItem
             lastItem = item
-            lastSnapshot = snapshot
             searchJob?.cancel()
             val generation = ++searchGeneration
             edit.isEnabled = item != null
@@ -144,7 +141,7 @@ class MonitoringUi(private val activity: AppCompatActivity, private val records:
             progress.visibility = View.VISIBLE
             info.text = "Searching received records…"
             searchJob = activity.lifecycleScope.launch {
-                val results = matching(item, snapshot)
+                val results = matching(item, records())
                 if (generation != searchGeneration) return@launch
                 allMatches = results
                 progress.visibility = View.GONE
