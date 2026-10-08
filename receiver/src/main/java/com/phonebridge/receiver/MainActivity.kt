@@ -114,7 +114,15 @@ class MainActivity : AppCompatActivity() {
     private var latestLocation: RecordEntity? = null
     private val sectionFilters = mutableMapOf<String, FilterCriteria>()
     private lateinit var recordDates: RecordDates
-    private val monitoring by lazy { MonitoringUi(this) { cachedRows } }
+    private var filterJob: Job? = null
+    private var filterGeneration = 0
+    private var filterSelection: List<Any?>? = null
+    private var loadedStatus = DeviceStatus()
+    private var loadedWarnings: List<RecordEntity> = emptyList()
+    private val monitoring by lazy { MonitoringUi(this) {
+        val id = devices.historyId(devices.activeId().orEmpty())
+        withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(id)) }
+    } }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -160,7 +168,7 @@ class MainActivity : AppCompatActivity() {
         openMapsButton = findViewById(R.id.btnOpenMaps)
         locationHistoryList = findViewById(R.id.locationHistoryList)
 
-        adapter = RecordAdapter(bindLocationName = locationDisplayNames::bind) { record ->
+        adapter = RecordAdapter(bindLocationName = locationDisplayNames::bind, asyncUpdates = true) { record ->
             lifecycleScope.launch {
                 withContext(Dispatchers.IO) { db.dao().deleteById(record.id) }
                 refreshLocal()
@@ -180,7 +188,7 @@ class MainActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btnMonitoring).setOnClickListener { monitoring.show() }
 
-        locationHistoryAdapter = RecordAdapter(bindLocationName = locationDisplayNames::bind)
+        locationHistoryAdapter = RecordAdapter(bindLocationName = locationDisplayNames::bind, asyncUpdates = true)
         locationHistoryList.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = locationHistoryAdapter
@@ -246,7 +254,7 @@ class MainActivity : AppCompatActivity() {
             updateReceiverRegistered = true
         }
         liveDataJob = lifecycleScope.launch {
-            db.dao().observeAll().collectLatest { refreshLocal() }
+            withContext(Dispatchers.IO) { db.dao() }.observeChanges().collectLatest { refreshLocal() }
         }
         if (auth.currentUser != null) {
             ReceiverSyncRequests.catchUpAll(this)
@@ -306,7 +314,7 @@ class MainActivity : AppCompatActivity() {
 
         updateFilterButton()
         if (isLocation) {
-            refreshLocationView()
+            lifecycleScope.launch { refreshLocal() }
         } else {
             applyFilter()
         }
@@ -383,6 +391,10 @@ class MainActivity : AppCompatActivity() {
         pairRegistration = null
         recentAddressJob?.cancel()
         cachedRows = emptyList()
+        loadedStatus = DeviceStatus()
+        loadedWarnings = emptyList()
+        filterGeneration++
+        filterJob?.cancel()
         latestLocation = null
         activeLocationRefreshRequestId = null
         locationRefreshStage = 0
@@ -420,7 +432,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderDeviceStatus() {
-        val state = if (devices.activeId().isNullOrEmpty()) DeviceStatus() else DeviceStatus.from(cachedRows)
+        val state = if (devices.activeId().isNullOrEmpty()) DeviceStatus() else loadedStatus
         val time = if (state.lastConnected > 0) SimpleDateFormat("dd MMM, hh:mm a", Locale.getDefault()).format(Date(state.lastConnected)) else "Not received yet"
         val values = listOf(state.edition, state.notifications, state.calls, state.location, time, state.version, state.build)
         statusValues.values.zip(values).forEach { (view, value) ->
@@ -928,7 +940,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun canRequestLocation(pairId: String): Boolean {
         val unavailable = pairId.isBlank() || devices.all().firstOrNull { it.pairId == pairId }?.archived == true
-        val lite = DeviceStatus.from(cachedRows).edition == "Lite"
+        val lite = loadedStatus.edition == "Lite"
         if (unavailable || lite) {
             AlertDialog.Builder(this).setTitle("Location unavailable")
                 .setMessage(if (lite) "Sender Lite does not share location." else "This profile contains stored records and has no active pairing.")
@@ -939,26 +951,39 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyFilter() {
-        val baseRows = when (currentFilter) {
-            "call" -> cachedRows.filter { it.type == "call" }
-            "notification" -> cachedRows.filter {
-                it.type == "notification" || it.type == "message" || it.type == "wp_call"
-            }
-            "message" -> cachedRows.filter { it.type == "message" && !isWhatsAppBackgroundCheck(it) }
-            "wp_call" -> cachedRows.filter { it.type == "wp_call" }
-            "location" -> emptyList()
-            "alert" -> DeviceStatus.warnings(cachedRows)
-            else -> cachedRows
-        }
-
-        val criteria = sectionFilters[currentFilter]
+        filterJob?.cancel()
+        val generation = ++filterGeneration
+        val section = currentFilter
+        val historyId = devices.historyId(devices.activeId().orEmpty())
+        val criteria = sectionFilters[section]
         recordDates.customRange(criteria?.fromMs, criteria?.toMs)
-        val datedRows = if (currentFilter == "alert" || criteria?.fromMs != null || criteria?.toMs != null) baseRows
-            else baseRows.filter { recordDates.matches(it) }
-        adapter.submit(
-            if (criteria == null || !criteria.isActive()) datedRows
-            else datedRows.filter { criteria.matches(it) }
-        )
+        val window = recordDates.window()
+        val custom = criteria?.fromMs != null || criteria?.toMs != null
+        val from = if (custom) criteria?.fromMs ?: Long.MIN_VALUE else window.first
+        val to = if (custom) criteria?.toMs ?: Long.MAX_VALUE else window.second - 1
+        val warnings = loadedWarnings
+        val selection = listOf(historyId, section, from, to, criteria)
+        if (selection != filterSelection) {
+            filterSelection = selection
+            adapter.submit(emptyList()) // Never display the previous device/date while loading.
+        }
+        filterJob = lifecycleScope.launch {
+            val rows = withContext(Dispatchers.IO) {
+                val types = when (section) {
+                    "notification" -> listOf("notification", "message", "wp_call")
+                    "message", "call", "wp_call" -> listOf(section)
+                    else -> emptyList()
+                }
+                val base = if (section == "alert") warnings else if (types.isEmpty()) emptyList()
+                    else MessageDuplicates.visible(db.dao().period(historyId, types, from, to))
+                base.filter { row ->
+                    (section != "message" || !isWhatsAppBackgroundCheck(row)) &&
+                        (criteria == null || !criteria.isActive() || criteria.matches(row))
+                }
+            }
+            if (generation == filterGeneration && currentFilter == section &&
+                historyId == devices.historyId(devices.activeId().orEmpty())) adapter.submit(rows)
+        }
     }
 
     // Also hides old misclassified records and records from older Sender versions.
@@ -978,7 +1003,16 @@ class MainActivity : AppCompatActivity() {
         val generation = ++localRefreshGeneration
         val selectedId = devices.activeId().orEmpty()
         val historyId = devices.historyId(selectedId)
-        val rows = withContext(Dispatchers.IO) { MessageDuplicates.visible(db.dao().forPair(historyId)) }
+        val section = currentFilter
+        val snapshot = withContext(Dispatchers.IO) {
+            val dao = db.dao()
+            val states = dao.statusRows(historyId)
+            val locations = if (section == "location" || activeLocationRefreshRequestId != null)
+                dao.period(historyId, listOf("location"), Long.MIN_VALUE, Long.MAX_VALUE)
+                else listOfNotNull(dao.latestLocation(historyId))
+            Triple(states + locations, DeviceStatus.from(states).copy(lastConnected = dao.lastConnected(historyId)), DeviceStatus.warnings(states))
+        }
+        val rows = snapshot.first
         if (generation != localRefreshGeneration || selectedId != devices.activeId().orEmpty() || historyId != devices.historyId(selectedId)) return
         if (displayedHistoryId != historyId) {
             displayedHistoryId = historyId
@@ -989,6 +1023,8 @@ class MainActivity : AppCompatActivity() {
             updateFilterButton()
         }
         cachedRows = rows
+        loadedStatus = snapshot.second
+        loadedWarnings = snapshot.third
         renderDeviceStatus()
         monitoring.refresh()
         val locationRows = cachedRows.filter { it.type == "location" }
@@ -1029,7 +1065,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val warningCount = DeviceStatus.warnings(cachedRows).size
+        val warningCount = loadedWarnings.size
         alertsButton.text = if (warningCount > 0) "🔔 " + warningCount else "🔔"
 
         if (currentFilter == "location") {

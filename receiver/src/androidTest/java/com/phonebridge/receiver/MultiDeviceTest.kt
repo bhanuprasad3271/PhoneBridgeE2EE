@@ -181,7 +181,7 @@ class MultiDeviceTest {
         old.execSQL("INSERT INTO records VALUES ('old', 'message', 1, 'sender', 'Old', 'Kept', '{}')")
         old.version = 1
         old.close()
-        val db = Room.databaseBuilder(context, LocalDb::class.java, name).addMigrations(LocalDb.MIGRATION_1_2).build()
+        val db = Room.databaseBuilder(context, LocalDb::class.java, name).addMigrations(LocalDb.MIGRATION_1_2, LocalDb.MIGRATION_2_3).build()
         try {
             assertEquals("Kept", db.dao().forPair("").single().body)
             assertTrue(db.dao().forPair("123456").isEmpty())

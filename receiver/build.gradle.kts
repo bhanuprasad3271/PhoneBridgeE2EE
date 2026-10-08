@@ -45,6 +45,7 @@ android {
 dependencies {
     implementation("net.zetetic:sqlcipher-android:4.19.1@aar")
     androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     // WorkManager's Future-returning APIs are exercised by the switching tests.
     androidTestImplementation("com.google.guava:guava:32.1.3-android")
