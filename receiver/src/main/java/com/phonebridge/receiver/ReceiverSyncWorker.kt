@@ -14,7 +14,9 @@ import com.phonebridge.shared.MessageIdentity
 import com.phonebridge.shared.EnvelopePolicy
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONObject
 
 class ReceiverSyncWorker(
@@ -26,6 +28,7 @@ class ReceiverSyncWorker(
         const val KEY_PAIR_ID = "pairId"
         const val KEY_QUEUE_ID = "queueId"
         const val ACTION_DATA_UPDATED = "com.phonebridge.receiver.DATA_UPDATED"
+        private val pairSyncLocks = ConcurrentHashMap<String, Mutex>()
     }
 
     private val auth = FirebaseAuth.getInstance()
@@ -45,27 +48,10 @@ class ReceiverSyncWorker(
             if (auth.currentUser == null) auth.signInAnonymously().await()
             var failed = false
             for (pairId in pairIds) try {
-            val pairRef = fs.collection("pairs").document(pairId)
-            val pairSnap = pairRef.get(com.google.firebase.firestore.Source.SERVER).await()
-            if (!pairSnap.exists() || pairSnap.getLong("disconnectedAtMs") != null) continue
-            if (!EnvelopePolicy.receiverOwns(pairSnap.data.orEmpty(), auth.currentUser?.uid, crypto.publicKeyB64())) continue
-            val collectorUid = pairSnap.getString("collectorUid") ?: continue
-
-            val collectorKey = pairSnap.getString("collectorPublicKeyB64")
-                ?: continue
-            val accepted = DeviceRecovery.mutex.withLock { profiles.bindSender(pairId, collectorKey) }
-            if (!accepted) continue
-
-            if (queueId != null) {
-                val doc = pairRef.collection("queue").document(queueId).get().await()
-                if (doc.exists()) processDoc(pairId, collectorKey, collectorUid, doc.id, doc.data.orEmpty())
-            } else {
-                val snap = pairRef.collection("queue").get().await()
-                if (!ReceiverQueueBatch.process(snap.documents) { doc ->
-                    processDoc(pairId, collectorKey, collectorUid, doc.id, doc.data.orEmpty())
-                }) failed = true
-            }
-
+                // A catch-up job and a live queue event can start together. Serialize
+                // their server read, local save and acknowledgement for this pair.
+                val lock = pairSyncLocks.computeIfAbsent(pairId) { Mutex() }
+                if (!lock.withLock { syncPair(pairId, profiles, queueId) }) failed = true
             } catch (cancelled: CancellationException) { throw cancelled }
               catch (_: Exception) { failed = true }
             applicationContext.sendBroadcast(
@@ -75,6 +61,27 @@ class ReceiverSyncWorker(
         } catch (cancelled: CancellationException) { throw cancelled }
           catch (_: Exception) {
             Result.retry()
+        }
+    }
+
+    private suspend fun syncPair(pairId: String, profiles: DeviceProfiles, queueId: String?): Boolean {
+        val pairRef = fs.collection("pairs").document(pairId)
+        val pairSnap = pairRef.get(com.google.firebase.firestore.Source.SERVER).await()
+        if (!pairSnap.exists() || pairSnap.getLong("disconnectedAtMs") != null) return true
+        if (!EnvelopePolicy.receiverOwns(pairSnap.data.orEmpty(), auth.currentUser?.uid, crypto.publicKeyB64())) return true
+        val collectorUid = pairSnap.getString("collectorUid") ?: return true
+        val collectorKey = pairSnap.getString("collectorPublicKeyB64") ?: return true
+        val accepted = DeviceRecovery.mutex.withLock { profiles.bindSender(pairId, collectorKey) }
+        if (!accepted) return true
+
+        if (queueId != null) {
+            val doc = pairRef.collection("queue").document(queueId).get().await()
+            if (doc.exists()) processDoc(pairId, collectorKey, collectorUid, doc.id, doc.data.orEmpty())
+            return true
+        }
+        val snap = pairRef.collection("queue").get().await()
+        return ReceiverQueueBatch.process(snap.documents) { doc ->
+            processDoc(pairId, collectorKey, collectorUid, doc.id, doc.data.orEmpty())
         }
     }
 
