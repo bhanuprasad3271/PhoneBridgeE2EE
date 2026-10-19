@@ -62,3 +62,7 @@ Debug APKs are for personal testing. Never commit or share a private signing key
 ## Security
 
 Read [SECURITY.md](SECURITY.md) before using the app with sensitive data. Public source code does not protect a Firebase database by itself: each project owner must configure and verify their own Firebase Authentication and Firestore Security Rules.
+
+## License
+
+This project is licensed under the MIT License. See [LICENSE](LICENSE).
