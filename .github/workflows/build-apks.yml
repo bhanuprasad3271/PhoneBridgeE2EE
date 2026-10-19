@@ -30,28 +30,11 @@ jobs:
         with:
           gradle-version: '8.13'
 
-      - name: Restore Firebase config
-        env:
-          FIREBASE_COLLECTOR: ${{ secrets.FIREBASE_GOOGLE_SERVICES_COLLECTOR || secrets.FIREBASE_GOOGLE_SERVICES }}
-          FIREBASE_RECEIVER: ${{ secrets.FIREBASE_GOOGLE_SERVICES_RECEIVER || secrets.FIREBASE_GOOGLE_SERVICES }}
+      - name: Configure Firebase placeholders for build
         run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          for module, key in (("collector", "FIREBASE_COLLECTOR"), ("receiver", "FIREBASE_RECEIVER")):
-              raw = os.environ.get(key, "")
-              if not raw.strip():
-                  raise SystemExit(f"Missing Firebase configuration for {module}")
-              try:
-                  config = json.loads(raw)
-              except json.JSONDecodeError:
-                  raise SystemExit(f"Invalid Firebase JSON for {module}")
-              expected = f"com.phonebridge.{module}"
-              packages = [c.get("client_info", {}).get("android_client_info", {}).get("package_name") for c in config.get("client", [])]
-              if expected not in packages:
-                  raise SystemExit(f"Firebase configuration does not include {expected}")
-              Path(module, "google-services.json").write_text(raw)
-          PY
+          # CI compiles and tests the source; it does not need access to anyone's Firebase project.
+          cp collector/google-services.json.example collector/google-services.json
+          cp receiver/google-services.json.example receiver/google-services.json
 
       - name: Test Receiver timeline logic
         run: gradle :receiver:testDebugUnitTest :receiver:assembleDebugAndroidTest --stacktrace
@@ -96,64 +79,6 @@ jobs:
       - name: Test signing safeguards with a disposable key
         run: python3 -m unittest discover -s scripts -p 'test_apk_signing.py' -v
 
-      # PR APKs have disposable debug certificates and must never be distributed.
+      # CI builds are validation only; no APK artifacts are published.
       - name: Check APK compilation
-        if: github.event_name == 'pull_request'
         run: gradle :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug --stacktrace
-
-      - name: Build and verify update APKs
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        env:
-          PHONEBRIDGE_REQUIRE_SIGNING: 'true'
-          PHONEBRIDGE_VERSION_CODE_BASE: '2000'
-          PHONEBRIDGE_KEYSTORE_PATH: ${{ runner.temp }}/phonebridge-signing.keystore
-          PHONEBRIDGE_KEYSTORE_BASE64: ${{ secrets.PHONEBRIDGE_KEYSTORE_BASE64 }}
-          PHONEBRIDGE_STORE_PASSWORD: ${{ secrets.PHONEBRIDGE_STORE_PASSWORD }}
-          PHONEBRIDGE_KEY_ALIAS: ${{ secrets.PHONEBRIDGE_KEY_ALIAS }}
-          PHONEBRIDGE_KEY_PASSWORD: ${{ secrets.PHONEBRIDGE_KEY_PASSWORD }}
-          PHONEBRIDGE_SIGNING_SHA256: ${{ vars.PHONEBRIDGE_SIGNING_SHA256 }}
-        run: |
-          set -euo pipefail
-          trap 'rm -f "$PHONEBRIDGE_KEYSTORE_PATH"' EXIT
-          python3 scripts/apk_signing.py restore
-          [[ "$PHONEBRIDGE_VERSION_CODE_BASE" =~ ^[0-9]+$ ]] || (echo "Invalid version code base" && exit 1)
-          export PHONEBRIDGE_VERSION_CODE=$((PHONEBRIDGE_VERSION_CODE_BASE + GITHUB_RUN_NUMBER))
-          gradle :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug --stacktrace
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -1)
-          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt -type f | sort -V | tail -1)
-          test -n "$APKSIGNER"
-          test -n "$AAPT"
-          for apk in receiver/build/outputs/apk/debug/receiver-debug.apk collector/build/outputs/apk/full/debug/collector-full-debug.apk collector/build/outputs/apk/lite/debug/collector-lite-debug.apk; do
-            python3 scripts/apk_signing.py verify "$APKSIGNER" "$apk"
-            if "$AAPT" dump badging "$apk" | grep -q '^application-debuggable'; then
-              echo '::error::Refusing to distribute a debuggable APK'
-              exit 1
-            fi
-          done
-          {
-            echo "Commit: $GITHUB_SHA"
-            echo "Version code: $PHONEBRIDGE_VERSION_CODE"
-            echo "Certificate SHA-256: $PHONEBRIDGE_SIGNING_SHA256"
-          } > APK-BUILD.txt
-
-      - name: Package APKs with app names
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        run: |
-          set -euo pipefail
-          package_dir="dist/PhoneBridge"
-          mkdir -p "$package_dir"
-          cp receiver/build/outputs/apk/debug/receiver-debug.apk "$package_dir/PhoneBridge-Receiver-${GITHUB_RUN_NUMBER}.apk"
-          cp collector/build/outputs/apk/full/debug/collector-full-debug.apk "$package_dir/PhoneBridge-Sender-Full-${GITHUB_RUN_NUMBER}.apk"
-          cp collector/build/outputs/apk/lite/debug/collector-lite-debug.apk "$package_dir/PhoneBridge-Sender-Lite-${GITHUB_RUN_NUMBER}.apk"
-          cmp receiver/build/outputs/apk/debug/receiver-debug.apk "$package_dir/PhoneBridge-Receiver-${GITHUB_RUN_NUMBER}.apk"
-          cmp collector/build/outputs/apk/full/debug/collector-full-debug.apk "$package_dir/PhoneBridge-Sender-Full-${GITHUB_RUN_NUMBER}.apk"
-          cmp collector/build/outputs/apk/lite/debug/collector-lite-debug.apk "$package_dir/PhoneBridge-Sender-Lite-${GITHUB_RUN_NUMBER}.apk"
-          test "$(find "$package_dir" -mindepth 1 -maxdepth 1 | wc -l)" -eq 3
-
-      - name: Upload APKs
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: PhoneBridge
-          path: dist/PhoneBridge/
-          if-no-files-found: error
