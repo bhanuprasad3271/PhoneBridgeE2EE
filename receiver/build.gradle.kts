@@ -50,7 +50,7 @@ dependencies {
     // WorkManager's Future-returning APIs are exercised by the switching tests.
     androidTestImplementation("com.google.guava:guava:32.1.3-android")
     implementation(project(":shared"))
-    implementation(platform("com.google.firebase:firebase-bom:34.16.0"))
+    implementation(platform("com.google.firebase:firebase-bom:35.0.2"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("androidx.core:core-ktx:1.17.0")
