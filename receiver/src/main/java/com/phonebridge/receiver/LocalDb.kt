@@ -28,8 +28,14 @@ interface RecordDao {
     @Query("SELECT * FROM records WHERE pairId = :pairId AND type IN ('status', 'alert') ORDER BY timestamp DESC")
     suspend fun statusRows(pairId: String): List<RecordEntity>
 
-    @Query("SELECT * FROM records WHERE pairId = :pairId AND type = 'location' ORDER BY timestamp DESC LIMIT 1")
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type = 'location' ORDER BY timestamp DESC, id DESC LIMIT 1")
     suspend fun latestLocation(pairId: String): RecordEntity?
+
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type = 'location' ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    suspend fun latestLocations(pairId: String, limit: Int): List<RecordEntity>
+
+    @Query("SELECT * FROM records WHERE pairId = :pairId AND type = 'location' AND (timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) ORDER BY timestamp DESC, id DESC LIMIT :limit")
+    suspend fun olderLocations(pairId: String, beforeTimestamp: Long, beforeId: String, limit: Int): List<RecordEntity>
 
     @Query("SELECT COALESCE(MAX(CASE WHEN json_valid(metadataJson) THEN COALESCE(json_extract(metadataJson, '$.receiverReceivedAtMs'), timestamp) ELSE timestamp END), 0) FROM records WHERE pairId = :pairId")
     suspend fun lastConnected(pairId: String): Long
