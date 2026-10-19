@@ -44,6 +44,7 @@ import java.util.UUID
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val DEFAULT_LOCATION_TRIGGER = "PBLOC#7421"
+        private const val LOCATION_HISTORY_PAGE_SIZE = 50
     }
     private val auth by lazy { FirebaseAuth.getInstance() }
     private val fs by lazy { FirebaseFirestore.getInstance() }
@@ -97,6 +98,10 @@ class MainActivity : AppCompatActivity() {
     private var queueRegistration: ListenerRegistration? = null
     private var activeLocationRefreshRequestId: String? = null
     private var locationRefreshStage = 0
+    private val locationHistoryRows = mutableListOf<RecordEntity>()
+    private var locationHistoryHasMore = false
+    private var locationHistoryLoading = false
+    private var locationHistoryGeneration = 0
 
     private var currentFilter = "message"
     private var cachedRows: List<RecordEntity> = emptyList()
@@ -181,6 +186,15 @@ class MainActivity : AppCompatActivity() {
         locationHistoryList.apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             adapter = locationHistoryAdapter
+            addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (dy <= 0) return
+                    val manager = recyclerView.layoutManager as? LinearLayoutManager ?: return
+                    if (manager.findLastVisibleItemPosition() >=
+                        locationHistoryAdapter.itemCount - 5
+                    ) loadOlderLocationHistory()
+                }
+            })
         }
 
         messagesButton.setOnClickListener { selectTab("message", "Messages") }
@@ -297,6 +311,7 @@ class MainActivity : AppCompatActivity() {
 
         updateFilterButton()
         if (isLocation) {
+            resetLocationHistory()
             lifecycleScope.launch { refreshLocal() }
         } else {
             applyFilter()
@@ -387,7 +402,7 @@ class MainActivity : AppCompatActivity() {
         monitoring.deviceChanged()
         displayedHistoryId = devices.historyId(pairId)
         adapter.submit(emptyList())
-        locationHistoryAdapter.submit(emptyList())
+        resetLocationHistory()
         renderDeviceStatus()
         updateFilterButton()
         if (auth.currentUser != null) listen(pairId) else showDashboard()
@@ -991,13 +1006,14 @@ class MainActivity : AppCompatActivity() {
             val dao = db.dao()
             val states = dao.statusRows(historyId)
             val locations = if (section == "location" || activeLocationRefreshRequestId != null)
-                dao.period(historyId, listOf("location"), Long.MIN_VALUE, Long.MAX_VALUE)
+                dao.latestLocations(historyId, LOCATION_HISTORY_PAGE_SIZE)
                 else listOfNotNull(dao.latestLocation(historyId))
             Triple(states + locations, DeviceStatus.from(states).copy(lastConnected = dao.lastConnected(historyId)), DeviceStatus.warnings(states))
         }
         val rows = snapshot.first
         if (generation != localRefreshGeneration || selectedId != devices.activeId().orEmpty() || historyId != devices.historyId(selectedId)) return
         if (displayedHistoryId != historyId) {
+            resetLocationHistory()
             displayedHistoryId = historyId
             locationDisplayNames.reloadSavedNames()
             monitoring.deviceChanged()
@@ -1011,16 +1027,17 @@ class MainActivity : AppCompatActivity() {
         loadedWarnings = snapshot.third
         renderDeviceStatus()
         monitoring.refresh()
-        val locationRows = cachedRows.filter { it.type == "location" }
-        latestLocation = locationRows.firstOrNull()
-        locationHistoryAdapter.submit(locationRows)
-        locationHistoryTitle.text = "Location history · " + locationRows.size
-        locationHistoryEmpty.visibility = if (locationRows.isEmpty()) View.VISIBLE else View.GONE
-        locationHistoryList.visibility = if (locationRows.isEmpty()) View.GONE else View.VISIBLE
+        val recentLocationRows = cachedRows.filter { it.type == "location" }
+        latestLocation = recentLocationRows.firstOrNull()
+        if (section == "location" && recentLocationRows.isNotEmpty()) {
+            mergeLocationHistoryPage(recentLocationRows, historyId)
+        } else if (locationHistoryRows.isNotEmpty()) {
+            updateLocationHistoryList()
+        }
 
         val activeRequestId = activeLocationRefreshRequestId
         if (activeRequestId != null) {
-            val savedForRequest = locationRows.firstOrNull { row ->
+            val savedForRequest = recentLocationRows.firstOrNull { row ->
                 try {
                     JSONObject(row.metadataJson).optString("requestId") == activeRequestId
                 } catch (_: Exception) {
@@ -1056,6 +1073,62 @@ class MainActivity : AppCompatActivity() {
             refreshLocationView()
         } else {
             applyFilter()
+        }
+    }
+
+    private fun resetLocationHistory() {
+        locationHistoryGeneration++
+        locationHistoryRows.clear()
+        locationHistoryHasMore = false
+        locationHistoryLoading = false
+        updateLocationHistoryList()
+    }
+
+    private fun mergeLocationHistoryPage(page: List<RecordEntity>, historyId: String) {
+        if (historyId != devices.historyId(devices.activeId().orEmpty())) return
+        val wasEmpty = locationHistoryRows.isEmpty()
+        val byId = LinkedHashMap<String, RecordEntity>()
+        page.forEach { byId[it.id] = it }
+        locationHistoryRows.forEach { byId[it.id] = it }
+        locationHistoryRows.clear()
+        locationHistoryRows.addAll(byId.values.sortedWith(
+            compareByDescending<RecordEntity> { it.timestamp }.thenByDescending { it.id }
+        ))
+        if (wasEmpty) locationHistoryHasMore = page.size == LOCATION_HISTORY_PAGE_SIZE
+        else if (page.size < LOCATION_HISTORY_PAGE_SIZE) locationHistoryHasMore = false
+        updateLocationHistoryList()
+    }
+
+    private fun updateLocationHistoryList() {
+        locationHistoryAdapter.submit(locationHistoryRows.toList())
+        locationHistoryTitle.text = "Location history · ${locationHistoryRows.size} loaded"
+        locationHistoryEmpty.visibility = if (locationHistoryRows.isEmpty()) View.VISIBLE else View.GONE
+        locationHistoryList.visibility = if (locationHistoryRows.isEmpty()) View.GONE else View.VISIBLE
+    }
+
+    private fun loadOlderLocationHistory() {
+        if (currentFilter != "location" || locationHistoryLoading || !locationHistoryHasMore) return
+        val oldest = locationHistoryRows.lastOrNull() ?: return
+        val historyId = devices.historyId(devices.activeId().orEmpty())
+        val generation = locationHistoryGeneration
+        locationHistoryLoading = true
+        lifecycleScope.launch {
+            val page = withContext(Dispatchers.IO) {
+                db.dao().olderLocations(
+                    historyId, oldest.timestamp, oldest.id, LOCATION_HISTORY_PAGE_SIZE
+                )
+            }
+            if (generation != locationHistoryGeneration ||
+                historyId != devices.historyId(devices.activeId().orEmpty())
+            ) return@launch
+            locationHistoryLoading = false
+            val existingIds = locationHistoryRows.mapTo(mutableSetOf()) { it.id }
+            page.filterNot { it.id in existingIds }.forEach(locationHistoryRows::add)
+            locationHistoryRows.sortWith(
+                compareByDescending<RecordEntity> { it.timestamp }.thenByDescending { it.id }
+            )
+            locationHistoryHasMore = page.size == LOCATION_HISTORY_PAGE_SIZE
+            updateLocationHistoryList()
         }
     }
 
