@@ -57,11 +57,18 @@ compromised/rooted or unlocked endpoint is not protected by E2EE alone.
 4. **Live endpoint testing:** use two consenting test devices and one unrelated
    test identity. Test deployed rules, revoked Sender denial, offline removal,
    Full↔Lite updates and multi-device history. Do not probe other users' data.
-5. **Dependency/supply-chain review:** this is not a full SBOM/CVE or repository
-   history secret scan. CI actions are still major-version tags, not immutable
-   SHA pins. A complete release audit must include those plus installed signing
-   certificate checks and cloud access review. Do not rotate the production
-   APK key casually: that breaks normal in-place updates.
+5. **Dependency/supply-chain review:** no complete SBOM/CVE review has been
+   performed. A pattern-based credential scan on 2026-10-19 covered 441 unique
+   text blobs across 171 main-history commits and 267 unique text blobs across
+   50 branch tips. It found no matches for the checked Google API key, private
+   key, AWS key, GitHub token, or Firebase service-account private-key patterns.
+   This is not proof that no secrets exist: the scan did not cover binary files,
+   workflow logs/artifacts, or every intermediate commit unique to non-main
+   branches. Workflow actions are pinned to full commit SHAs, with weekly
+   Dependabot updates configured; review those updates before merging. A release
+   audit still needs an SBOM/CVE review, workflow-log/artifact review, installed
+   signing-certificate checks, and cloud access review. Do not rotate a
+   production APK key casually: that breaks normal in-place updates.
 
 ## Testing and roll-out
 
