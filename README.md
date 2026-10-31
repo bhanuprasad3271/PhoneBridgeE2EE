@@ -38,7 +38,7 @@ In Android Studio, open **Build > Select Build Variant**. Choose `debug` for `re
 Or, on Windows, open Android Studio's Terminal at the project root and run:
 
 ```powershell
-.\\gradlew.bat :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug
+.\gradlew.bat :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug
 ```
 
 On macOS or Linux, run:
@@ -57,7 +57,7 @@ Install the Receiver APK and one Sender edition on your devices, then pair them.
 
 ## Updates and signing
 
-Android Studio's debug builds use the debug signing key on your computer. Keep that key at `%USERPROFILE%\\.android\\debug.keystore` on Windows (or `~/.android/debug.keystore` on macOS/Linux) and back it up securely if you need to keep installing updates over the same app. If the key is lost or replaced, Android will not install the new APK over the old one; uninstalling first can erase app data.
+Android Studio's debug builds use the debug signing key on your computer. Keep that key at `%USERPROFILE%\.android\debug.keystore` on Windows (or `~/.android/debug.keystore` on macOS/Linux) and back it up securely if you need to keep installing updates over the same app. If the key is lost or replaced, Android will not install the new APK over the old one; uninstalling first can erase app data.
 
 Debug APKs are for personal testing. Never commit or share a private signing key. A separately managed, persistent key is required for a release build that should update existing installations.
 
