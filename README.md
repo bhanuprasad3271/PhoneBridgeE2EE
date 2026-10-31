@@ -15,12 +15,14 @@ Create a Firebase project in your Google account. In that project, register two 
 - Sender: `com.phonebridge.collector`
 - Receiver: `com.phonebridge.receiver`
 
-Download the `google-services.json` file for each registered app and place them here:
+This repository contains safe templates named `google-services.json.example`; they contain placeholders only and cannot connect to Firebase as-is. For each Android app, download its own real `google-services.json` from your Firebase project and put it in the matching module:
 
-- `collector/google-services.json`
-- `receiver/google-services.json`
+- Sender: `collector/google-services.json`
+- Receiver: `receiver/google-services.json`
 
-These files are ignored by Git. Do not add Firebase Admin SDK or service-account credentials to this project. Enable Anonymous sign-in and create a Cloud Firestore database. Deploy the included Firestore rules to your own project with Firebase CLI:
+You can copy the matching `.json.example` file as a starting point, but replace its entire contents with the real file downloaded from Firebase. Keep the real files local: Git ignores both paths, so do not force-add or commit them. Never put Firebase Admin SDK/service-account credentials, signing keys, passwords, or private keys in this repository.
+
+Enable Anonymous sign-in and create a Cloud Firestore database. Deploy the included Firestore rules to your own project with Firebase CLI:
 
 ```powershell
 firebase login
@@ -36,7 +38,7 @@ In Android Studio, open **Build > Select Build Variant**. Choose `debug` for `re
 Or, on Windows, open Android Studio's Terminal at the project root and run:
 
 ```powershell
-.\gradlew.bat :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug
+.\\gradlew.bat :receiver:assembleDebug :collector:assembleFullDebug :collector:assembleLiteDebug
 ```
 
 On macOS or Linux, run:
@@ -55,7 +57,7 @@ Install the Receiver APK and one Sender edition on your devices, then pair them.
 
 ## Updates and signing
 
-Android Studio's debug builds use the debug signing key on your computer. Keep that key at `%USERPROFILE%\.android\debug.keystore` on Windows (or `~/.android/debug.keystore` on macOS/Linux) and back it up securely if you need to keep installing updates over the same app. If the key is lost or replaced, Android will not install the new APK over the old one; uninstalling first can erase app data.
+Android Studio's debug builds use the debug signing key on your computer. Keep that key at `%USERPROFILE%\\.android\\debug.keystore` on Windows (or `~/.android/debug.keystore` on macOS/Linux) and back it up securely if you need to keep installing updates over the same app. If the key is lost or replaced, Android will not install the new APK over the old one; uninstalling first can erase app data.
 
 Debug APKs are for personal testing. Never commit or share a private signing key. A separately managed, persistent key is required for a release build that should update existing installations.
 
