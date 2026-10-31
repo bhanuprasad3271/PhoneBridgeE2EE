@@ -4,16 +4,29 @@ PhoneBridge is a two-part Android application for sending information from a pai
 
 This repository contains the source code for both apps. You build and configure your own copies; there are no prebuilt APKs or shared Firebase credentials provided here.
 
-## What the apps do
+## What PhoneBridge can do
 
-- **Sender** — runs on the device that shares information after the user grants the required Android permissions and approves pairing.
-- **Receiver** — runs on the device that receives and displays the information shared by its paired Sender.
-- **Encrypted transfer** — records are encrypted on the Sender and decrypted by the paired Receiver. Firebase carries the encrypted data; it is not the place where the app stores the plaintext content.
-- **Pairing and device control** — devices use a pairing flow and server-checked pair ownership. A Receiver can manage its paired Sender devices.
-- **Local history** — the Receiver stores its history in encrypted local storage.
-- **Sender editions** — the Full edition includes location-related functionality; the Lite edition omits the location dependency.
+PhoneBridge connects two phones: one runs **Sender** and the other runs **Receiver**. After you pair them and approve the required access, the Sender can share selected phone activity with the Receiver.
 
-PhoneBridge does not bypass Android permissions. The Sender user must approve pairing and grant the permissions required by the features they use. End-to-end encryption does not protect a device that is already compromised or unlocked by someone else.
+| Icon | Feature | In simple words |
+|---|---|---|
+| 📞 | **Phone calls** | Shows incoming, outgoing, missed and rejected mobile calls, with the call time and duration. |
+| 💬 | **Messages** | Sends message previews shown in supported messaging-app notifications, including WhatsApp, Telegram, Signal and other recognised messaging apps. |
+| 📲 | **App notifications** | Shows notification previews from apps on the Sender phone. |
+| ☎️ | **Internet calls** | Tracks call notifications from supported apps such as WhatsApp, Telegram, Signal, Messenger, Instagram, Meet, Skype, Teams and Viber. What appears depends on the notification provided by each app. |
+| 📍 | **Location sharing (Full edition)** | Shares the Sender phone's location with the paired Receiver, with location history and a timeline. The Full edition requires the relevant location permissions. |
+| 🗺️ | **Location timeline** | Lets the Receiver review saved location points and view places on a map. |
+| 🔐 | **Encrypted transfer** | Encrypts records on the Sender before sending them. The paired Receiver decrypts them. |
+| 📱 | **Multiple paired devices** | Lets the Receiver manage paired Sender devices. |
+
+**A few important details:**
+
+- The Sender does not silently read every SMS in the phone. Message previews are collected from notifications, so notification access must be enabled and the messaging app must show a readable notification.
+- Call history requires the Android call-log and phone-state permissions.
+- Location sharing is available in **Sender Full** only. **Sender Lite** still supports messages, calls and notifications, but does not collect location.
+- Android permissions and notification visibility vary by device, Android version and app. Some apps hide message text in notifications, so those details may not be available to PhoneBridge.
+- PhoneBridge does not bypass Android permissions. Pair only devices you own or have permission to connect.
+
 
 ## Requirements
 
